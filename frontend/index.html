@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Retiro 2026 — Até Quando?</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- CSS principal -->
+  <link rel="stylesheet" href="./css/style.css" />
+</head>
+
+<body>
+
+  <div class="container">
+
+    <!-- LOGO / BANNER -->
+    <div class="logos">
+      <img src="./assets/id-pulse.PNG" alt="Identidade do Retiro" />
+      <!-- Se sua imagem for .png minúsculo, troque para: id-pulse.png -->
+    </div>
+
+    <!-- TÍTULO -->
+    <h1>RETIRO 2026<br/>ATÉ QUANDO?</h1>
+
+    <!-- SUBTÍTULO -->
+    <p class="sub">• Dias 03 a 05 de Abril • Palhoça - SC</p>
+
+    <!-- TIMER -->
+    <div id="timer" class="timer">
+      <div><span id="dias">00</span><small>Dias</small></div>
+      <div><span id="horas">00</span><small>Horas</small></div>
+      <div><span id="minutos">00</span><small>Min</small></div>
+      <div><span id="segundos">00</span><small>Seg</small></div>
+    </div>
+
+    <!-- CONTADOR DE VAGAS -->
+    <p id="vagas" class="sub">Vagas disponíveis: <strong>--</strong></p>
+
+    <!-- FORMULÁRIO -->
+    <form id="formInscricao" autocomplete="on">
+      <input type="text" placeholder="Nome completo" id="nome" required />
+      <input type="text" placeholder="CPF" id="cpf" required />
+      <input type="date" id="nascimento" required />
+      <input type="email" placeholder="Email" id="email" required />
+      <input type="tel" placeholder="Telefone" id="telefone" required />
+
+      <!-- Frequento a Palavra Viva? -->
+      <select id="frequentaPV" required>
+        <option value="" disabled selected>Frequento a Palavra Viva?</option>
+        <option value="Sim">Sim</option>
+        <option value="Não">Não</option>
+        <option value="Visitante">Visitante</option>
+      </select>
+
+      <!-- Campus (só aparece quando "Sim") -->
+      <div id="wrapCampus" style="display:none;">
+        <select id="campus">
+          <option value="" disabled selected>Qual Palavra Viva?</option>
+          <option value="Antônio Carlos">Antônio Carlos</option>
+          <option value="Ingleses">Ingleses</option>
+          <option value="Rio Vermelho">Rio Vermelho</option>
+          <option value="Sede">Sede</option>
+        </select>
+      </div>
+
+      <!-- Forma de pagamento -->
+      <select id="formaPagamento" required>
+        <option value="" disabled selected>Forma de pagamento</option>
+        <option value="pix">Pix à vista</option>
+        <option value="boleto">Boleto</option>
+        <option value="cartao">Cartão de crédito</option>
+      </select>
+
+      <!-- Quantidade de parcelas (só quando "boleto") -->
+      <div id="wrapParcelas" style="display:none; margin-top:8px;">
+        <select id="qtdParcelas">
+          <option value="3" selected>3 parcelas</option>
+          <option value="2">2 parcelas</option>
+          <option value="1">1 parcela (boleto à vista)</option>
+        </select>
+        <small class="muted" style="display:block;margin-top:4px;color:#9aa0a6">
+          A última parcela vence em 01/04/2026. As anteriores são ajustadas automaticamente.
+        </small>
+      </div>
+
+      <button type="submit">FINALIZAR INSCRIÇÃO</button>
+    </form>
+
+    <!-- FORMAS DE PAGAMENTO -->
+    <div class="footer">
+      ✔ Pix à vista<br>
+      ✔ Cartão com acréscimo da maquininha<br>
+      ✔ Boleto (1x/2x/3x) — <u>quitação até 01/04/2026</u>
+    </div>
+
+  </div>
+
+  <!-- === MOSTRAR/OCULTAR CAMPUS/PARCELAS === -->
+  <script>
+    const API = 'http://127.0.0.1:3333';
+
+    const frequentaPV   = document.getElementById('frequentaPV');
+    const wrapCampus    = document.getElementById('wrapCampus');
+    const campus        = document.getElementById('campus');
+
+    const formaPagamento = document.getElementById('formaPagamento');
+    const wrapParcelas   = document.getElementById('wrapParcelas');
+    const qtdParcelas    = document.getElementById('qtdParcelas');
+
+    frequentaPV.addEventListener('change', () => {
+      const v = frequentaPV.value;
+      if (v === 'Sim') {
+        wrapCampus.style.display = 'block';
+        campus.setAttribute('required', 'required');
+      } else {
+        wrapCampus.style.display = 'none';
+        campus.removeAttribute('required');
+        campus.value = '';
+      }
+    });
+
+    formaPagamento.addEventListener('change', () => {
+      wrapParcelas.style.display = (formaPagamento.value === 'boleto') ? 'block' : 'none';
+    });
+  </script>
+
+  <!-- === SUBMIT: CRIA INSCRIÇÃO + DISPARA PAGAMENTO CONFORME ESCOLHA === -->
+  <script>
+    const form = document.getElementById("formInscricao");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const freq  = document.getElementById('frequentaPV').value;
+      const camp  = document.getElementById('campus') ? document.getElementById('campus').value : null;
+      const forma = document.getElementById('formaPagamento').value;
+
+      // Payload coerente
+      let campusFinal = null;
+      if (freq === 'Sim')       campusFinal = camp || null;
+      if (freq === 'Visitante') campusFinal = 'Visitante';
+
+      const dados = {
+        nome: document.getElementById('nome').value.trim(),
+        cpf: document.getElementById('cpf').value.trim(),
+        nascimento: document.getElementById('nascimento').value,
+        email: document.getElementById('email').value.trim(),
+        telefone: document.getElementById('telefone').value.trim(),
+        frequentaPV: freq,
+        campus: campusFinal
+      };
+
+      const botao = form.querySelector('button[type="submit"]');
+      const prev  = botao.innerText;
+      botao.disabled = true;
+      botao.innerText = 'Enviando...';
+
+      try {
+        // 1) Cria inscrição
+        const res = await fetch(`${API}/inscricao`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(dados)
+        });
+
+        console.log("[INSCRICAO] status:", res.status);
+        const inscText = await res.text();
+        console.log("[INSCRICAO] body:", inscText);
+
+        if (res.status === 409) {
+          let t; try { t = JSON.parse(inscText); } catch { t = {erro:'CPF duplicado'}; }
+          alert(t.erro || "Já existe uma inscrição para este CPF.");
+          return;
+        }
+        if (res.status === 403) {
+          let t; try { t = JSON.parse(inscText); } catch { t = {erro:'Inscrições encerradas'}; }
+          alert(t.erro || "Inscrições encerradas.");
+          encerrarInscricoes();
+          return;
+        }
+        if (res.status === 400) {
+          let t; try { t = JSON.parse(inscText); } catch { t = {erro:'Dados inválidos. Confira os campos.'}; }
+          alert(t.erro || 'Dados inválidos. Confira os campos.');
+          return;
+        }
+        if (!res.ok) {
+          alert(`Falha /inscricao (${res.status}): ${inscText.slice(0, 300)}`);
+          return;
+        }
+
+        let json;
+        try { json = JSON.parse(inscText); } catch {
+          alert("Resposta inesperada da /inscricao.");
+          return;
+        }
+        const inscritoId = json.id;
+
+        // 2) Pagamento conforme escolha
+        if (forma === 'boleto') {
+          // === BOLETO 1x/2x/3x — última até 01/04/2026 ===
+          try {
+            const r2 = await fetch(`${API}/pagamentos/asaas/boletos/${inscritoId}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ parcelas: Number(qtdParcelas.value || 3) })
+            });
+
+            console.log("[BOLETOS] status:", r2.status);
+            const text = await r2.text();
+            console.log("[BOLETOS] body:", text);
+
+            let j2; try { j2 = JSON.parse(text); } catch { j2 = { ok:false }; }
+
+            if (r2.ok) {
+              const parcelas = (j2 && j2.parcelas) ? j2.parcelas : [];
+              let msg = "Inscrição criada! Geramos boletos no ASAAS (Sandbox).";
+              if (parcelas.length) {
+                const links = parcelas
+                  .map(p => p.boleto_url ? `\n• Parcela ${p.parcela} (R$ ${p.valor}) — vence ${p.vencimento}: ${p.boleto_url}` : "")
+                  .join("");
+                if (links.trim()) msg += "\n\nLinks dos boletos:" + links;
+              }
+              alert(msg);
+            } else {
+              alert("Inscrição criada, mas houve falha ao gerar os boletos.\n\nDetalhe: " + text.slice(0, 600));
+            }
+          } catch (errBoleto) {
+            console.error("[BOLETOS] fetch erro:", errBoleto);
+            alert("Inscrição criada, mas não conseguimos gerar os boletos agora. A equipe entrará em contato.");
+          }
+
+        } else if (forma === 'pix') {
+          // === PIX À VISTA ===
+          try {
+            const rPix = await fetch(`${API}/pagamentos/asaas/pix/${inscritoId}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" }
+            });
+
+            const textPix = await rPix.text();
+            console.log("[PIX] status:", rPix.status);
+            console.log("[PIX] body:", textPix);
+
+            let jPix; try { jPix = JSON.parse(textPix); } catch { jPix = { ok:false }; }
+
+            if (rPix.ok && jPix.ok) {
+              abrirPixModal({
+                qrImageBase64: jPix.qrImageBase64 || null,
+                qrPayload: jPix.qrPayload || ''
+              });
+            } else {
+              alert("Inscrição criada! Não foi possível gerar o Pix agora. Tente novamente em instantes.");
+            }
+          } catch (err) {
+            console.error("[PIX] fetch erro:", err);
+            alert("Inscrição criada! Não foi possível gerar o Pix agora.");
+          }
+
+        } else if (forma === 'cartao') {
+          alert("Inscrição criada! O pagamento por cartão será concluído em uma próxima etapa.");
+        }
+
+        // 3) Limpa UI e recarrega vagas
+        form.reset();
+        wrapCampus.style.display = 'none';
+        campus.removeAttribute('required');
+        wrapParcelas.style.display = 'none';
+        carregarVagas();
+
+      } catch (err) {
+        console.error('Catch geral:', err);
+        alert("Erro real (catch): " + (err?.message || 'Falha desconhecida'));
+      } finally {
+        botao.disabled = false;
+        botao.innerText = prev;
+      }
+    });
+  </script>
+
+  <!-- === TIMER === -->
+  <script>
+    // Até 03/04/2026 18:00 (America/Sao_Paulo)
+    const alvo = new Date("2026-04-03T18:00:00-03:00").getTime();
+
+    setInterval(() => {
+      const agora = Date.now();
+      const diff = Math.max(0, alvo - agora);
+
+      const d = Math.floor(diff / (1000 * 60 * 60 * 24));
+      const h = Math.floor((diff / (1000 * 60 * 60)) % 24);
+      const m = Math.floor((diff / (1000 * 60)) % 60);
+      const s = Math.floor((diff / 1000) % 60);
+
+      const elDias = document.getElementById('dias');
+      const elHoras = document.getElementById('horas');
+      const elMin = document.getElementById('minutos');
+      const elSeg = document.getElementById('segundos');
+
+      if (!elDias || !elHoras || !elMin || !elSeg) return;
+
+      elDias.textContent = String(d).padStart(2, '0');
+      elHoras.textContent = String(h).padStart(2, '0');
+      elMin.textContent = String(m).padStart(2, '0');
+      elSeg.textContent = String(s).padStart(2, '0');
+    }, 1000);
+  </script>
+
+  <!-- === VAGAS (consulta backend) === -->
+  <script>
+    async function carregarVagas() {
+      try {
+        const res = await fetch("http://127.0.0.1:3333/vagas");
+        const { restantes } = await res.json();
+        const alvo = document.querySelector('#vagas strong');
+        if (alvo) alvo.textContent = restantes;
+        if (restantes <= 0) encerrarInscricoes();
+      } catch (e) {
+        console.warn("Não foi possível carregar vagas agora.");
+      }
+    }
+
+    function encerrarInscricoes() {
+      const form  = document.getElementById('formInscricao');
+      const botao = form.querySelector('button[type="submit"]');
+      form.querySelectorAll('input, select').forEach(i => i.disabled = true);
+      botao.disabled = true;
+      botao.style.filter = 'grayscale(0.9)';
+      botao.style.cursor = 'not-allowed';
+      const aviso = document.createElement('p');
+      aviso.style.cssText = 'text-align:center;color:#ff6b6b;margin:12px 0;';
+      aviso.textContent = 'Inscrições encerradas — vagas esgotadas.';
+      form.insertAdjacentElement('beforebegin', aviso);
+    }
+
+    // Carrega ao abrir
+    carregarVagas();
+  </script>
+
+  <!-- ===== MODAL PIX ===== -->
+  <div id="pixModal" style="display:none; position:fixed; inset:0; background:#0009; z-index:9999; align-items:center; justify-content:center;">
+    <div style="width:92%; max-width:420px; background:#141414; border:1px solid #242424; border-radius:12px; padding:18px;">
+      <h3 style="margin:0 0 8px; color:#16D2F2; text-align:center;">Pix à vista</h3>
+      <p style="color:#bbb; font-size:14px; text-align:center; margin:0 0 12px;">
+        Escaneie o QR Code abaixo ou copie o código para pagar no seu banco.
+      </p>
+      <div id="pixQrWrap" style="display:flex; align-items:center; justify-content:center; background:#0e0e0e; border:1px solid #222; border-radius:8px; height:260px; margin-bottom:10px;">
+        <img id="pixQrImg" src="" alt="QR Code Pix" style="max-width:240px; max-height:240px; display:none;"/>
+        <div id="pixQrFallback" style="color:#777; font-size:13px; text-align:center; padding:10px;">
+          QR Code não disponível. Use o botão "Copiar código".
+        </div>
+      </div>
+      <textarea id="pixPayload" readonly style="width:100%; height:80px; background:#111; color:#fff; border:1px solid #333; border-radius:8px; padding:10px; font-size:12px; margin-bottom:10px;"></textarea>
+      <div style="display:flex; gap:10px;">
+        <button id="btnCopiarPix" style="flex:1; height:44px; border:none; border-radius:8px; background:#1f6feb; color:#fff; font-weight:bold; cursor:pointer;">Copiar código</button>
+        <button id="btnFecharPix" style="width:120px; height:44px; border:1px solid #333; border-radius:8px; background:#151515; color:#fff; cursor:pointer;">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Comportamento do modal PIX
+    const pixModal       = document.getElementById('pixModal');
+    const pixPayloadEl   = document.getElementById('pixPayload');
+    const pixQrImg       = document.getElementById('pixQrImg');
+    const pixQrFallback  = document.getElementById('pixQrFallback');
+    const btnCopiarPix   = document.getElementById('btnCopiarPix');
+    const btnFecharPix   = document.getElementById('btnFecharPix');
+
+    btnFecharPix.addEventListener('click', () => { pixModal.style.display = 'none'; });
+    btnCopiarPix.addEventListener('click', async () => {
+      if (!pixPayloadEl.value) return;
+      try {
+        await navigator.clipboard.writeText(pixPayloadEl.value);
+        btnCopiarPix.textContent = 'Copiado!';
+        setTimeout(() => btnCopiarPix.textContent = 'Copiar código', 1500);
+      } catch {
+        alert('Não foi possível copiar. Selecione o código e copie manualmente.');
+      }
+    });
+
+    function abrirPixModal({ qrImageBase64, qrPayload }) {
+      if (qrImageBase64) {
+        pixQrImg.src = `data:image/png;base64,${qrImageBase64}`;
+        pixQrImg.style.display = 'block';
+        pixQrFallback.style.display = 'none';
+      } else {
+        pixQrImg.style.display = 'none';
+        pixQrFallback.style.display = 'block';
+      }
+      pixPayloadEl.value = qrPayload || '';
+      pixModal.style.display = 'flex';
+    }
+  </script>
+  <!-- ===== FIM MODAL PIX ===== -->
+
+</body>
+</html>
