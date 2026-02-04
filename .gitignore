@@ -1,0 +1,19 @@
+# Node
+node_modules/
+
+# Variáveis de ambiente
+.env
+.env.*
+backend/.env
+
+# Banco de dados local
+database.db
+backend/database.db
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Sistema
+.DS_Store
