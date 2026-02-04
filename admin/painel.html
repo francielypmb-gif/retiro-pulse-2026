@@ -42,7 +42,6 @@
   .msg.err{background:#2b0d0d;border:1px solid #5a1e1e;color:#ffaaaa}
   .msg.ok{background:#0d2b1b;border:1px solid #1e5a3a;color:#b6ffd0}
   .loading{padding:16px;text-align:center;color:#9aa0a6}
-  /* Modal */
   .modal{position:fixed;inset:0;background:#0009;display:none;align-items:center;justify-content:center;z-index:9999}
   .modal .box{width:92%;max-width:520px;background:#141414;border:1px solid #242424;border-radius:12px;padding:14px}
   .box h3{margin:0 0 10px;color:#16D2F2}
@@ -131,7 +130,7 @@
 
 <script>
   // ======= CONFIG =======
-  const BASE = 'http://127.0.0.1:3333';
+  const BASE = 'https://retiro-pulse-2026-backend.onrender.com';
   // const ADMIN_TOKEN = 'Retiro2026Admin123';
 
   const HEADERS = {
@@ -319,9 +318,7 @@
     }
   }
 
-  [elQ, elFCampus, elFStatus].forEach(el=>{
-    el.addEventListener('input', ()=> render(cache.filter(filtro)));
-    el.addEventListener('change', ()=> render(cache.filter(filtro)));
+ tListener('change', ()=> render(cache.filter(filtro)));
   });
 
   document.getElementById('btnReload').onclick = carregar;

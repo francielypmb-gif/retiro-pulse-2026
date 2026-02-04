@@ -94,9 +94,10 @@
 
   </div>
 
-  <!-- === MOSTRAR/OCULTAR CAMPUS/PARCELAS === -->
+  <!-- === CONFIG / UI === -->
   <script>
-    const API = 'http://127.0.0.1:3333';
+    // USE SEMPRE HTTPS do Render (evita Mixed Content na Locaweb)
+    const API = 'https://retiro-pulse-2026-backend.onrender.com';
 
     const frequentaPV   = document.getElementById('frequentaPV');
     const wrapCampus    = document.getElementById('wrapCampus');
@@ -121,6 +122,23 @@
     formaPagamento.addEventListener('change', () => {
       wrapParcelas.style.display = (formaPagamento.value === 'boleto') ? 'block' : 'none';
     });
+  </script>
+
+  <!-- === (OPCIONAL, RECOMENDADO) Validação de CPF no navegador === -->
+  <script>
+    function cpfValido(cpf) {
+      const s = (cpf || '').replace(/\D/g, '');
+      if (!/^\d{11}$/.test(s)) return false;
+      if (/^(\d)\1{10}$/.test(s)) return false;
+      let soma = 0, resto;
+      for (let i = 1; i <= 9; i++) soma += parseInt(s.substring(i-1,i)) * (11 - i);
+      resto = (soma * 10) % 11; if (resto === 10 || resto === 11) resto = 0;
+      if (resto !== parseInt(s.substring(9,10))) return false;
+      soma = 0;
+      for (let i = 1; i <= 10; i++) soma += parseInt(s.substring(i-1,i)) * (12 - i);
+      resto = (soma * 10) % 11; if (resto === 10 || resto === 11) resto = 0;
+      return resto === parseInt(s.substring(10,11));
+    }
   </script>
 
   <!-- === SUBMIT: CRIA INSCRIÇÃO + DISPARA PAGAMENTO CONFORME ESCOLHA === -->
@@ -155,6 +173,14 @@
       botao.innerText = 'Enviando...';
 
       try {
+        // (Opcional) barrar CPF inválido antes do envio
+        if (!cpfValido(dados.cpf)) {
+          alert('CPF inválido. Verifique e tente novamente.');
+          botao.disabled = false;
+          botao.innerText = prev;
+          return;
+        }
+
         // 1) Cria inscrição
         const res = await fetch(`${API}/inscricao`, {
           method: "POST",
@@ -196,7 +222,7 @@
 
         // 2) Pagamento conforme escolha
         if (forma === 'boleto') {
-          // === BOLETO 1x/2x/3x — última até 01/04/2026 ===
+          // === BOLETO 1x/2x/3x — última em 01/04/2026 ===
           try {
             const r2 = await fetch(`${API}/pagamentos/asaas/boletos/${inscritoId}`, {
               method: "POST",
@@ -299,8 +325,9 @@
 
       elDias.textContent = String(d).padStart(2, '0');
       elHoras.textContent = String(h).padStart(2, '0');
-      elMin.textContent = String(m).padStart(2, '0');
-      elSeg.textContent = String(s).padStart(2, '0');
+      const pad = x => String(x).padStart(2, '0');
+      elMin.textContent = pad(m);
+      elSeg.textContent = pad(s);
     }, 1000);
   </script>
 
@@ -308,7 +335,7 @@
   <script>
     async function carregarVagas() {
       try {
-        const res = await fetch("http://127.0.0.1:3333/vagas");
+        const res = await fetch(`${API}/vagas`);
         const { restantes } = await res.json();
         const alvo = document.querySelector('#vagas strong');
         if (alvo) alvo.textContent = restantes;
