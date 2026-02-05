@@ -4,11 +4,35 @@ const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
 const QRCode = require('qrcode');
-
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 const app = express();
 const PORT = process.env.PORT || 3333;
+
+/* ==========================
+   CORS explícito (INCLUSÃO)
+   - libera seu domínio Locaweb
+   - responde preflight OPTIONS
+========================== */
+const allowOrigin = [
+  'https://pvpulseingleses.com.br',
+  'https://www.pvpulseingleses.com.br'
+];
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (!origin || allowOrigin.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin || '*');
+  }
+  res.header('Vary', 'Origin');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+  res.header(
+    'Access-Control-Allow-Headers',
+    'Origin, X-Requested-With, Content-Type, Accept, Authorization, asaas-access-token'
+  );
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  return next();
+});
 
 app.use(cors());
 app.use(express.json());
@@ -24,7 +48,6 @@ const ASAAS = {
 };
 
 async function asaas(path, opts = {}) {
-
   const res = await fetch(`${ASAAS.baseUrl}${path}`, {
     method: opts.method || "GET",
     headers: {
@@ -35,9 +58,7 @@ async function asaas(path, opts = {}) {
   });
 
   const text = await res.text();
-
   if (!res.ok) throw new Error(text);
-
   return JSON.parse(text);
 }
 
@@ -55,7 +76,6 @@ const db = new sqlite3.Database('./database.db', (err) => {
 });
 
 function criarTabelas() {
-
   db.serialize(() => {
 
     db.run(`
@@ -90,7 +110,6 @@ function criarTabelas() {
     `);
 
   });
-
 }
 
 
@@ -103,20 +122,13 @@ function normalizarCPF(cpf){
 }
 
 async function getOrCreateCustomer(nome,email,cpf){
-
   const find = await asaas(`/customers?cpfCnpj=${cpf}`);
-
   if(find.data.length) return find.data[0];
 
   return asaas(`/customers`,{
     method:"POST",
-    body:{
-      name:nome,
-      email,
-      cpfCnpj:cpf
-    }
+    body:{ name:nome, email, cpfCnpj:cpf }
   });
-
 }
 
 
@@ -134,13 +146,9 @@ app.get('/', (req,res)=>{
 // ==========================
 
 app.post('/inscricao', async (req,res)=>{
-
   try{
-
     const {nome, cpf, nascimento, email, telefone, frequentaPV, campus} = req.body;
-
     const cpfNorm = normalizarCPF(cpf);
-
     const qr = await QRCode.toDataURL(cpfNorm + "-" + Date.now());
 
     db.run(`
@@ -150,17 +158,13 @@ app.post('/inscricao', async (req,res)=>{
     `,
     [nome, cpf, cpfNorm, nascimento, email, telefone, frequentaPV, campus, qr],
     function(err){
-
       if(err) return res.status(500).json({erro:err.message});
-
       res.json({id:this.lastID});
-
     });
 
   }catch(e){
     res.status(500).json({erro:"Erro interno"});
   }
-
 });
 
 
@@ -169,13 +173,11 @@ app.post('/inscricao', async (req,res)=>{
 // ==========================
 
 app.post('/pagamentos/asaas/pix/:id', async (req,res)=>{
-
   try{
-
     const inscritoId = req.params.id;
 
     db.get(`SELECT * FROM inscritos WHERE id=?`,[inscritoId], async (err,i)=>{
-
+      if(err) return res.status(500).json({erro:'DB get error'});
       if(!i) return res.status(404).json({erro:"Inscrito não encontrado"});
 
       const customer = await getOrCreateCustomer(i.nome,i.email,i.cpf_norm);
@@ -189,7 +191,7 @@ app.post('/pagamentos/asaas/pix/:id', async (req,res)=>{
         }
       });
 
-      // ✅ ADIÇÃO: registrar a cobrança PIX na tabela de parcelas (sem remover nada)
+      // ✅ INCLUSÃO: registrar a cobrança PIX na tabela de parcelas
       db.run(`
         INSERT INTO parcelas
         (inscrito_id, parcela, valor_cents, status, asaas_payment_id)
@@ -202,13 +204,11 @@ app.post('/pagamentos/asaas/pix/:id', async (req,res)=>{
         qrPayload: pay.pixQrCode.payload,
         qrImageBase64: pay.pixQrCode.encodedImage
       });
-
     });
 
   }catch(e){
     res.status(500).json({erro:e.message});
   }
-
 });
 
 
@@ -217,24 +217,25 @@ app.post('/pagamentos/asaas/pix/:id', async (req,res)=>{
 // ==========================
 
 app.post('/pagamentos/asaas/boletos/:id', async (req,res)=>{
-
   try{
-
     const inscritoId = req.params.id;
-    const parcelas = req.body.parcelas || 3;
+    const parcelas = Number(req.body.parcelas || 3);
     const valorTotal = 320;
 
     db.get(`SELECT * FROM inscritos WHERE id=?`,[inscritoId], async (err,i)=>{
+      if(err) return res.status(500).json({erro:'DB get error'});
+      if(!i) return res.status(404).json({erro:"Inscrito não encontrado"});
 
       const customer = await getOrCreateCustomer(i.nome,i.email,i.cpf_norm);
 
-      const valorParcela = valorTotal / parcelas;
+      // ✅ INCLUSÃO (necessária): arredondar para evitar rejeição por centavos
+      const valorParcela = Number((valorTotal / parcelas).toFixed(2));
+      const toCents = (v) => Math.round(Number(v) * 100);
 
       const lista = [];
 
       for(let p=1;p<=parcelas;p++){
-
-        // ✅ ADIÇÃO: calcular vencimento com última em 01/04/2026
+        // ✅ INCLUSÃO: calcular vencimento (última em 01/04/2026)
         const venc = new Date(2026,3,1); // (mês 0-based: 3 = abril)
         venc.setMonth(venc.getMonth() - (parcelas - p));
         const dueDate = venc.toISOString().slice(0,10);
@@ -245,7 +246,6 @@ app.post('/pagamentos/asaas/boletos/:id', async (req,res)=>{
             customer:customer.id,
             billingType:"BOLETO",
             value:valorParcela,
-            // ✅ ADIÇÃO: informar o vencimento ao Asaas
             dueDate: dueDate
           }
         });
@@ -255,9 +255,9 @@ app.post('/pagamentos/asaas/boletos/:id', async (req,res)=>{
           (inscrito_id, parcela, valor_cents, status, boleto_url, asaas_payment_id)
           VALUES (?,?,?,?,?,?)
         `,
-        [inscritoId,p,valorParcela*100,"pending",pay.bankSlipUrl,pay.id]);
+        [inscritoId,p,toCents(valorParcela),"pending",pay.bankSlipUrl,pay.id]);
 
-        // ✅ ADIÇÃO: garantir que o vencimento fique salvo mesmo sem mudar seu INSERT
+        // ✅ INCLUSÃO: garantir que o vencimento fique salvo
         db.run(`
           UPDATE parcelas
           SET vencimento=?
@@ -268,51 +268,66 @@ app.post('/pagamentos/asaas/boletos/:id', async (req,res)=>{
           parcela:p,
           boleto_url:pay.bankSlipUrl
         });
-
       }
 
       res.json({ok:true,parcelas:lista});
-
     });
 
   }catch(e){
     res.status(500).json({erro:e.message});
   }
-
 });
 
 
 // ==========================
-// WEBHOOK ASAAS
+// WEBHOOK ASAAS (com validação de token)
 // ==========================
+app.post('/webhook/asaas', (req, res) => {
+  try {
+    // Validação opcional por token
+    const expected = process.env.ASAAS_WEBHOOK_TOKEN; // pode estar vazio
+    if (expected) {
+      const token = req.headers['asaas-access-token'];
+      if (!token || token !== expected) {
+        return res.status(401).json({ erro: 'Token inválido' });
+      }
+    }
 
-app.post('/webhook/asaas',(req,res)=>{
+    const payment = req.body && req.body.payment;
+    if (!payment) {
+      // evita 4xx para não travar fila de reenvio do Asaas
+      return res.json({ ok: true, skip: 'payload sem payment' });
+    }
 
-  const payment = req.body.payment;
+    const statusOriginal = String(payment.status || '');
+    const statusUpper = statusOriginal.toUpperCase(); // ✅ INCLUSÃO: comparação consistente
 
-  if(!payment) return res.json({ok:true});
-
-  db.run(`
-    UPDATE parcelas
-    SET status=?
-    WHERE asaas_payment_id=?
-  `,
-  [payment.status,payment.id]);
-
-  // ✅ ADIÇÃO: ao receber pagamento, quita automaticamente a inscrição
-  if (payment.status === 'RECEIVED' || payment.status === 'CONFIRMED') {
+    // Atualiza parcela com o status vindo do Asaas (mantém formato original)
     db.run(`
-      UPDATE inscritos
-      SET status='quitado'
-      WHERE id IN (
-        SELECT inscrito_id FROM parcelas
-        WHERE asaas_payment_id=?
-      )
-    `,[payment.id]);
+      UPDATE parcelas
+      SET status=?
+      WHERE asaas_payment_id=?
+    `,
+    [statusOriginal, payment.id]);
+
+    // Se pago/confirmado, quita inscrição automaticamente
+    if (statusUpper === 'RECEIVED' || statusUpper === 'CONFIRMED') {
+      db.run(`
+        UPDATE inscritos
+        SET status='quitado'
+        WHERE id IN (
+          SELECT inscrito_id FROM parcelas
+          WHERE asaas_payment_id=?
+        )
+      `,[payment.id]);
+    }
+
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error('[WEBHOOK] erro geral:', e);
+    // responde 200 para permitir reenvio
+    return res.json({ ok: true, erro: 'exception' });
   }
-
-  res.json({ok:true});
-
 });
 
 
@@ -321,19 +336,14 @@ app.post('/webhook/asaas',(req,res)=>{
 // ==========================
 
 app.get('/vagas',(req,res)=>{
-
   db.get(`SELECT COUNT(*) as total FROM inscritos`,(err,row)=>{
-
     const LIMITE = 115;
-
     res.json({
       total:LIMITE,
       pagos:row.total,
       restantes:LIMITE - row.total
     });
-
   });
-
 });
 
 
@@ -364,7 +374,7 @@ app.get('/admin/parcelas/:id',(req,res)=>{
   (e,r)=> res.json(r));
 });
 
-// ✅ ADIÇÃO: cancelar inscrição (rota nova)
+// ✅ INCLUSÃO: cancelar inscrição (rota nova)
 app.post('/admin/cancelar/:id',(req,res)=>{
   db.run(`
     UPDATE inscritos
@@ -374,7 +384,7 @@ app.post('/admin/cancelar/:id',(req,res)=>{
   ()=>res.json({ok:true}));
 });
 
-// ✅ ADIÇÃO (opcional): editar dados do inscrito (rota nova)
+// ✅ INCLUSÃO (opcional): editar dados do inscrito (rota nova)
 app.post('/admin/editar/:id',(req,res)=>{
   const { nome,email,telefone,campus } = req.body || {};
   db.run(`
