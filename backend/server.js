@@ -4,7 +4,8 @@ const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
 const QRCode = require('qrcode');
-const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
+// USANDO FETCH NATIVO DO NODE (Node 18+): sem dependência de node-fetch
+const fetch = (...args) => global.fetch(...args);
 
 const app = express();
 const PORT = process.env.PORT || 3333;
