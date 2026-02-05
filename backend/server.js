@@ -6,6 +6,7 @@ const cors = require('cors');
 const QRCode = require('qrcode');
 // USANDO FETCH NATIVO DO NODE (Node 18+): sem dependência de node-fetch
 const fetch = (...args) => global.fetch(...args);
+const path = require('path'); // ✅ INCLUSÃO: para caminho determinístico do SQLite
 
 const app = express();
 const PORT = process.env.PORT || 3333;
@@ -48,8 +49,8 @@ const ASAAS = {
   key: process.env.ASAAS_API_KEY
 };
 
-async function asaas(path, opts = {}) {
-  const res = await fetch(`${ASAAS.baseUrl}${path}`, {
+async function asaas(pathUrl, opts = {}) {
+  const res = await fetch(`${ASAAS.baseUrl}${pathUrl}`, {
     method: opts.method || "GET",
     headers: {
       "Content-Type": "application/json",
@@ -68,10 +69,12 @@ async function asaas(path, opts = {}) {
 // BANCO
 // ==========================
 
-const db = new sqlite3.Database('./database.db', (err) => {
+// ✅ INCLUSÃO: caminho determinístico do SQLite (independe de onde o processo inicia)
+const dbPath = path.join(process.cwd(), 'database.db');
+const db = new sqlite3.Database(dbPath, (err) => {
   if (err) console.error("Erro banco:", err);
   else {
-    console.log("✅ Banco conectado");
+    console.log("✅ Banco conectado em:", dbPath);
     criarTabelas();
   }
 });
@@ -192,7 +195,7 @@ app.post('/pagamentos/asaas/pix/:id', async (req,res)=>{
         }
       });
 
-      // ✅ INCLUSÃO: registrar a cobrança PIX na tabela de parcelas
+      // registrar a cobrança PIX na tabela de parcelas
       db.run(`
         INSERT INTO parcelas
         (inscrito_id, parcela, valor_cents, status, asaas_payment_id)
@@ -329,7 +332,7 @@ app.post('/webhook/asaas', (req, res) => {
     }
 
     const statusOriginal = String(payment.status || '');
-    const statusUpper = statusOriginal.toUpperCase(); // ✅ INCLUSÃO: comparação consistente
+    const statusUpper = statusOriginal.toUpperCase(); // comparação consistente
 
     // Atualiza parcela com o status vindo do Asaas (mantém formato original)
     db.run(`
@@ -403,7 +406,7 @@ app.get('/admin/parcelas/:id',(req,res)=>{
   (e,r)=> res.json(r));
 });
 
-// ✅ INCLUSÃO: cancelar inscrição (rota nova)
+// cancelar inscrição
 app.post('/admin/cancelar/:id',(req,res)=>{
   db.run(`
     UPDATE inscritos
@@ -413,7 +416,7 @@ app.post('/admin/cancelar/:id',(req,res)=>{
   ()=>res.json({ok:true}));
 });
 
-// ✅ INCLUSÃO (opcional): editar dados do inscrito (rota nova)
+// editar dados do inscrito (opcional)
 app.post('/admin/editar/:id',(req,res)=>{
   const { nome,email,telefone,campus } = req.body || {};
   db.run(`
@@ -435,3 +438,4 @@ app.post('/admin/editar/:id',(req,res)=>{
 app.listen(PORT,()=>{
   console.log("🔥 Servidor rodando porta",PORT);
 });
+``
