@@ -214,68 +214,96 @@ app.post('/pagamentos/asaas/pix/:id', async (req,res)=>{
 
 
 // ==========================
-// BOLETO
+// BOLETO (AJUSTADA: try/catch interno + logs)
 // ==========================
 
-app.post('/pagamentos/asaas/boletos/:id', async (req,res)=>{
-  try{
+app.post('/pagamentos/asaas/boletos/:id', async (req,res) => {
+  try {
     const inscritoId = req.params.id;
     const parcelas = Number(req.body.parcelas || 3);
     const valorTotal = 320;
 
-    db.get(`SELECT * FROM inscritos WHERE id=?`,[inscritoId], async (err,i)=>{
-      if(err) return res.status(500).json({erro:'DB get error'});
-      if(!i) return res.status(404).json({erro:"Inscrito não encontrado"});
+    console.log('[BOLETO] init', { inscritoId, parcelas, valorTotal });
 
-      const customer = await getOrCreateCustomer(i.nome,i.email,i.cpf_norm);
+    db.get(`SELECT * FROM inscritos WHERE id=?`, [inscritoId], async (err, i) => {
+      try {
+        if (err) {
+          console.error('[BOLETO] sqlite get err', err);
+          return res.status(500).json({ ok:false, erro:'DB get error' });
+        }
+        if (!i) {
+          console.warn('[BOLETO] inscrito não encontrado', { inscritoId });
+          return res.status(404).json({ ok:false, erro:'Inscrito não encontrado' });
+        }
 
-      // ✅ INCLUSÃO (necessária): arredondar para evitar rejeição por centavos
-      const valorParcela = Number((valorTotal / parcelas).toFixed(2));
-      const toCents = (v) => Math.round(Number(v) * 100);
+        console.log('[BOLETO] cliente', { nome: i.nome, email: i.email, cpf: i.cpf_norm });
 
-      const lista = [];
+        let customer;
+        try {
+          customer = await getOrCreateCustomer(i.nome, i.email, i.cpf_norm);
+        } catch (e) {
+          console.error('[BOLETO] getOrCreateCustomer erro', e?.message || e);
+          return res.status(502).json({
+            ok:false, etapa:'customer', erro: String(e?.message || e).slice(0, 800)
+          });
+        }
 
-      for(let p=1;p<=parcelas;p++){
-        // ✅ INCLUSÃO: calcular vencimento (última em 01/04/2026)
-        const venc = new Date(2026,3,1); // (mês 0-based: 3 = abril)
-        venc.setMonth(venc.getMonth() - (parcelas - p));
-        const dueDate = venc.toISOString().slice(0,10);
+        // arredondamento seguro
+        const valorParcela = Number((valorTotal / parcelas).toFixed(2));
+        const toCents = v => Math.round(Number(v) * 100);
 
-        const pay = await asaas(`/payments`,{
-          method:"POST",
-          body:{
-            customer:customer.id,
-            billingType:"BOLETO",
-            value:valorParcela,
-            dueDate: dueDate
+        const lista = [];
+
+        for (let p = 1; p <= parcelas; p++) {
+          const venc = new Date(2026, 3, 1); // 01/04/2026 (mês 0-based)
+          venc.setMonth(venc.getMonth() - (parcelas - p));
+          const dueDate = venc.toISOString().slice(0, 10);
+
+          try {
+            console.log('[BOLETO] criando parcela', { p, valorParcela, dueDate });
+
+            const pay = await asaas('/payments', {
+              method: 'POST',
+              body: {
+                customer: customer.id,
+                billingType: 'BOLETO',
+                value: valorParcela,
+                dueDate
+              }
+            });
+
+            console.log('[BOLETO] ok parcela', { p, paymentId: pay.id, url: pay.bankSlipUrl });
+
+            db.run(`
+              INSERT INTO parcelas
+              (inscrito_id, parcela, valor_cents, vencimento, status, boleto_url, asaas_payment_id)
+              VALUES (?,?,?,?,?,?,?)
+            `, [inscritoId, p, toCents(valorParcela), new Date(dueDate).toISOString(), 'PENDING', pay.bankSlipUrl, pay.id]);
+
+            lista.push({ parcela: p, boleto_url: pay.bankSlipUrl });
+
+          } catch (e) {
+            console.error('[BOLETO] erro parcela', p, e?.message || e);
+            return res.status(502).json({
+              ok: false,
+              etapa: 'asaas-payments',
+              parcela: p,
+              erro: String(e?.message || e).slice(0, 800)
+            });
           }
-        });
+        }
 
-        db.run(`
-          INSERT INTO parcelas
-          (inscrito_id, parcela, valor_cents, status, boleto_url, asaas_payment_id)
-          VALUES (?,?,?,?,?,?)
-        `,
-        [inscritoId,p,toCents(valorParcela),"pending",pay.bankSlipUrl,pay.id]);
+        return res.json({ ok: true, parcelas: lista });
 
-        // ✅ INCLUSÃO: garantir que o vencimento fique salvo
-        db.run(`
-          UPDATE parcelas
-          SET vencimento=?
-          WHERE asaas_payment_id=?
-        `,[venc.toISOString(), pay.id]);
-
-        lista.push({
-          parcela:p,
-          boleto_url:pay.bankSlipUrl
-        });
+      } catch (e) {
+        console.error('[BOLETO] erro interno callback', e?.message || e);
+        return res.status(500).json({ ok:false, erro:String(e?.message || e).slice(0, 800) });
       }
-
-      res.json({ok:true,parcelas:lista});
     });
 
-  }catch(e){
-    res.status(500).json({erro:e.message});
+  } catch (e) {
+    console.error('[BOLETO] catch externo', e?.message || e);
+    return res.status(500).json({ ok:false, erro:String(e?.message || e).slice(0, 800) });
   }
 });
 
