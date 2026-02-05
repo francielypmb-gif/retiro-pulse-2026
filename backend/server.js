@@ -5,11 +5,41 @@ const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
 const QRCode = require('qrcode');
 
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
+
 const app = express();
 const PORT = process.env.PORT || 3333;
 
 app.use(cors());
 app.use(express.json());
+
+
+// ==========================
+// CONFIG ASAAS
+// ==========================
+
+const ASAAS = {
+  baseUrl: process.env.ASAAS_BASE_URL || "https://sandbox.asaas.com/api/v3",
+  key: process.env.ASAAS_API_KEY
+};
+
+async function asaas(path, opts = {}) {
+
+  const res = await fetch(`${ASAAS.baseUrl}${path}`, {
+    method: opts.method || "GET",
+    headers: {
+      "Content-Type": "application/json",
+      "access_token": ASAAS.key
+    },
+    body: opts.body ? JSON.stringify(opts.body) : undefined
+  });
+
+  const text = await res.text();
+
+  if (!res.ok) throw new Error(text);
+
+  return JSON.parse(text);
+}
 
 
 // ==========================
@@ -54,11 +84,10 @@ function criarTabelas() {
         valor_cents INTEGER,
         vencimento TEXT,
         status TEXT,
-        boleto_url TEXT
+        boleto_url TEXT,
+        asaas_payment_id TEXT
       )
     `);
-
-    console.log("✅ Tabelas criadas/verificadas");
 
   });
 
@@ -73,6 +102,23 @@ function normalizarCPF(cpf){
   return (cpf || '').replace(/\D/g,'');
 }
 
+async function getOrCreateCustomer(nome,email,cpf){
+
+  const find = await asaas(`/customers?cpfCnpj=${cpf}`);
+
+  if(find.data.length) return find.data[0];
+
+  return asaas(`/customers`,{
+    method:"POST",
+    body:{
+      name:nome,
+      email,
+      cpfCnpj:cpf
+    }
+  });
+
+}
+
 
 // ==========================
 // HOME
@@ -84,7 +130,7 @@ app.get('/', (req,res)=>{
 
 
 // ==========================
-// CRIAR INSCRIÇÃO
+// INSCRIÇÃO
 // ==========================
 
 app.post('/inscricao', async (req,res)=>{
@@ -92,9 +138,6 @@ app.post('/inscricao', async (req,res)=>{
   try{
 
     const {nome, cpf, nascimento, email, telefone, frequentaPV, campus} = req.body;
-
-    if(!nome || !cpf || !email)
-      return res.status(400).json({erro:"Campos obrigatórios"});
 
     const cpfNorm = normalizarCPF(cpf);
 
@@ -108,19 +151,133 @@ app.post('/inscricao', async (req,res)=>{
     [nome, cpf, cpfNorm, nascimento, email, telefone, frequentaPV, campus, qr],
     function(err){
 
-      if(err){
-        console.log(err);
-        return res.status(500).json({erro:err.message});
-      }
+      if(err) return res.status(500).json({erro:err.message});
 
       res.json({id:this.lastID});
 
     });
 
   }catch(e){
-    console.log(e);
     res.status(500).json({erro:"Erro interno"});
   }
+
+});
+
+
+// ==========================
+// PIX
+// ==========================
+
+app.post('/pagamentos/asaas/pix/:id', async (req,res)=>{
+
+  try{
+
+    const inscritoId = req.params.id;
+
+    db.get(`SELECT * FROM inscritos WHERE id=?`,[inscritoId], async (err,i)=>{
+
+      if(!i) return res.status(404).json({erro:"Inscrito não encontrado"});
+
+      const customer = await getOrCreateCustomer(i.nome,i.email,i.cpf_norm);
+
+      const pay = await asaas(`/payments`,{
+        method:"POST",
+        body:{
+          customer:customer.id,
+          billingType:"PIX",
+          value:320
+        }
+      });
+
+      res.json({
+        ok:true,
+        qrPayload: pay.pixQrCode.payload,
+        qrImageBase64: pay.pixQrCode.encodedImage
+      });
+
+    });
+
+  }catch(e){
+    res.status(500).json({erro:e.message});
+  }
+
+});
+
+
+// ==========================
+// BOLETO
+// ==========================
+
+app.post('/pagamentos/asaas/boletos/:id', async (req,res)=>{
+
+  try{
+
+    const inscritoId = req.params.id;
+    const parcelas = req.body.parcelas || 3;
+    const valorTotal = 320;
+
+    db.get(`SELECT * FROM inscritos WHERE id=?`,[inscritoId], async (err,i)=>{
+
+      const customer = await getOrCreateCustomer(i.nome,i.email,i.cpf_norm);
+
+      const valorParcela = valorTotal / parcelas;
+
+      const lista = [];
+
+      for(let p=1;p<=parcelas;p++){
+
+        const pay = await asaas(`/payments`,{
+          method:"POST",
+          body:{
+            customer:customer.id,
+            billingType:"BOLETO",
+            value:valorParcela
+          }
+        });
+
+        db.run(`
+          INSERT INTO parcelas
+          (inscrito_id, parcela, valor_cents, status, boleto_url, asaas_payment_id)
+          VALUES (?,?,?,?,?,?)
+        `,
+        [inscritoId,p,valorParcela*100,"pending",pay.bankSlipUrl,pay.id]);
+
+        lista.push({
+          parcela:p,
+          boleto_url:pay.bankSlipUrl
+        });
+
+      }
+
+      res.json({ok:true,parcelas:lista});
+
+    });
+
+  }catch(e){
+    res.status(500).json({erro:e.message});
+  }
+
+});
+
+
+// ==========================
+// WEBHOOK ASAAS
+// ==========================
+
+app.post('/webhook/asaas',(req,res)=>{
+
+  const payment = req.body.payment;
+
+  if(!payment) return res.json({ok:true});
+
+  db.run(`
+    UPDATE parcelas
+    SET status=?
+    WHERE asaas_payment_id=?
+  `,
+  [payment.status,payment.id]);
+
+  res.json({ok:true});
 
 });
 
@@ -131,22 +288,14 @@ app.post('/inscricao', async (req,res)=>{
 
 app.get('/vagas',(req,res)=>{
 
-  db.get(`
-    SELECT COUNT(*) as total,
-    SUM(CASE WHEN status='quitado' THEN 1 ELSE 0 END) as pagos
-    FROM inscritos
-  `,(err,row)=>{
-
-    if(err) return res.status(500).json({erro:err.message});
+  db.get(`SELECT COUNT(*) as total FROM inscritos`,(err,row)=>{
 
     const LIMITE = 115;
 
-    const restantes = LIMITE - (row.total || 0);
-
     res.json({
-      total: row.total || 0,
-      pagos: row.pagos || 0,
-      restantes
+      total:LIMITE,
+      pagos:row.total,
+      restantes:LIMITE - row.total
     });
 
   });
@@ -155,100 +304,30 @@ app.get('/vagas',(req,res)=>{
 
 
 // ==========================
-// ADMIN LISTA INSCRITOS
+// ADMIN
 // ==========================
 
 app.get('/admin/inscritos',(req,res)=>{
-
-  db.all(`
-    SELECT * FROM inscritos
-    ORDER BY id DESC
-  `,(err,rows)=>{
-
-    if(err) return res.status(500).json({erro:err.message});
-
-    res.json(rows);
-
-  });
-
+  db.all(`SELECT * FROM inscritos ORDER BY id DESC`,(err,rows)=> res.json(rows));
 });
-
-
-// ==========================
-// ADMIN STATUS
-// ==========================
 
 app.post('/admin/status/:id',(req,res)=>{
-
-  const {status} = req.body;
-
-  db.run(`
-    UPDATE inscritos
-    SET status=?
-    WHERE id=?
-  `,
-  [status, req.params.id],
-  function(err){
-
-    if(err) return res.status(500).json({erro:err.message});
-
-    res.json({ok:true});
-
-  });
-
+  db.run(`UPDATE inscritos SET status=? WHERE id=?`,
+  [req.body.status, req.params.id],
+  ()=> res.json({ok:true}));
 });
-
-
-// ==========================
-// ADMIN CHECKIN
-// ==========================
 
 app.post('/admin/checkin/:id',(req,res)=>{
-
-  const {value} = req.body;
-
-  db.run(`
-    UPDATE inscritos
-    SET checkin=?
-    WHERE id=?
-  `,
-  [value, req.params.id],
-  function(err){
-
-    if(err) return res.status(500).json({erro:err.message});
-
-    res.json({ok:true});
-
-  });
-
+  db.run(`UPDATE inscritos SET checkin=? WHERE id=?`,
+  [req.body.value, req.params.id],
+  ()=> res.json({ok:true}));
 });
 
-
-// ==========================
-// ADMIN PARCELAS
-// ==========================
-
 app.get('/admin/parcelas/:id',(req,res)=>{
-
-  db.all(`
-    SELECT
-      parcela,
-      vencimento,
-      valor_cents/100.0 as valor,
-      status,
-      boleto_url
-    FROM parcelas
-    WHERE inscrito_id=?
-  `,
+  db.all(`SELECT parcela,vencimento,valor_cents/100 as valor,status,boleto_url
+  FROM parcelas WHERE inscrito_id=?`,
   [req.params.id],
-  (err,rows)=>{
-
-    if(err) return res.status(500).json({erro:err.message});
-
-    res.json(rows);
-
-  });
-
+  (e,r)=> res.json(r));
 });
 
 
