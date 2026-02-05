@@ -153,6 +153,9 @@ function render(lista){
         <td>${p.checkin ? '✅' : '-'}</td>
         <td>
           <button class="btn ok" onclick="setStatus(${p.id},'quitado')">Quitado</button>
+          <!-- ✅ ADIÇÃO: botões extras sem remover o seu -->
+          <button class="btn warn" onclick="setCheckin(${p.id},1)">Check-in</button>
+          <button class="btn danger" onclick="cancelar(${p.id})">Cancelar</button>
         </td>
       </tr>
     `);
@@ -207,6 +210,23 @@ async function setStatus(id,status){
     body:JSON.stringify({status})
   });
 
+  carregar();
+}
+
+// ✅ ADIÇÃO: check-in (função nova)
+async function setCheckin(id,value){
+  await fetch(`${BASE}/admin/checkin/${id]}`,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({value})
+  });
+  carregar();
+}
+
+// ✅ ADIÇÃO: cancelar (função nova)
+async function cancelar(id){
+  if(!confirm('Deseja cancelar esta inscrição?')) return;
+  await fetch(`${BASE}/admin/cancelar/${id}`,{ method:'POST' });
   carregar();
 }
 

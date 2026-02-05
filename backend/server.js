@@ -189,6 +189,14 @@ app.post('/pagamentos/asaas/pix/:id', async (req,res)=>{
         }
       });
 
+      // ✅ ADIÇÃO: registrar a cobrança PIX na tabela de parcelas (sem remover nada)
+      db.run(`
+        INSERT INTO parcelas
+        (inscrito_id, parcela, valor_cents, status, asaas_payment_id)
+        VALUES (?,?,?,?,?)
+      `,
+      [inscritoId, 1, 32000, "pending", pay.id]);
+
       res.json({
         ok:true,
         qrPayload: pay.pixQrCode.payload,
@@ -226,12 +234,19 @@ app.post('/pagamentos/asaas/boletos/:id', async (req,res)=>{
 
       for(let p=1;p<=parcelas;p++){
 
+        // ✅ ADIÇÃO: calcular vencimento com última em 01/04/2026
+        const venc = new Date(2026,3,1); // (mês 0-based: 3 = abril)
+        venc.setMonth(venc.getMonth() - (parcelas - p));
+        const dueDate = venc.toISOString().slice(0,10);
+
         const pay = await asaas(`/payments`,{
           method:"POST",
           body:{
             customer:customer.id,
             billingType:"BOLETO",
-            value:valorParcela
+            value:valorParcela,
+            // ✅ ADIÇÃO: informar o vencimento ao Asaas
+            dueDate: dueDate
           }
         });
 
@@ -241,6 +256,13 @@ app.post('/pagamentos/asaas/boletos/:id', async (req,res)=>{
           VALUES (?,?,?,?,?,?)
         `,
         [inscritoId,p,valorParcela*100,"pending",pay.bankSlipUrl,pay.id]);
+
+        // ✅ ADIÇÃO: garantir que o vencimento fique salvo mesmo sem mudar seu INSERT
+        db.run(`
+          UPDATE parcelas
+          SET vencimento=?
+          WHERE asaas_payment_id=?
+        `,[venc.toISOString(), pay.id]);
 
         lista.push({
           parcela:p,
@@ -276,6 +298,18 @@ app.post('/webhook/asaas',(req,res)=>{
     WHERE asaas_payment_id=?
   `,
   [payment.status,payment.id]);
+
+  // ✅ ADIÇÃO: ao receber pagamento, quita automaticamente a inscrição
+  if (payment.status === 'RECEIVED' || payment.status === 'CONFIRMED') {
+    db.run(`
+      UPDATE inscritos
+      SET status='quitado'
+      WHERE id IN (
+        SELECT inscrito_id FROM parcelas
+        WHERE asaas_payment_id=?
+      )
+    `,[payment.id]);
+  }
 
   res.json({ok:true});
 
@@ -328,6 +362,30 @@ app.get('/admin/parcelas/:id',(req,res)=>{
   FROM parcelas WHERE inscrito_id=?`,
   [req.params.id],
   (e,r)=> res.json(r));
+});
+
+// ✅ ADIÇÃO: cancelar inscrição (rota nova)
+app.post('/admin/cancelar/:id',(req,res)=>{
+  db.run(`
+    UPDATE inscritos
+    SET status='cancelado'
+    WHERE id=?
+  `,[req.params.id],
+  ()=>res.json({ok:true}));
+});
+
+// ✅ ADIÇÃO (opcional): editar dados do inscrito (rota nova)
+app.post('/admin/editar/:id',(req,res)=>{
+  const { nome,email,telefone,campus } = req.body || {};
+  db.run(`
+    UPDATE inscritos
+    SET nome = COALESCE(?, nome),
+        email = COALESCE(?, email),
+        telefone = COALESCE(?, telefone),
+        campus = COALESCE(?, campus)
+    WHERE id=?
+  `,[nome,email,telefone,campus,req.params.id],
+  ()=>res.json({ok:true}));
 });
 
 
