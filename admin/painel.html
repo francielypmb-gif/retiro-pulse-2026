@@ -19,79 +19,57 @@
   .card strong{display:block;font-size:20px;margin-top:2px}
   .filters{display:flex;gap:8px;flex-wrap:wrap}
   input,select,button{height:40px;border-radius:8px;border:1px solid var(--line);background:#111;color:#fff;padding:0 12px}
-  input::placeholder{color:#6f6f6f}
   button.primary{background:linear-gradient(90deg,#E6001D,#16D2F2);border:none;font-weight:bold}
-  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
-  th,td{padding:10px;border-bottom:1px solid var(--line);text-align:left;font-size:14px;vertical-align:middle}
+  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line)}
+  th,td{padding:10px;border-bottom:1px solid var(--line);font-size:14px}
   thead th{background:#111}
-  .status{padding:4px 8px;border-radius:20px;font-size:12px;display:inline-block}
+  .status{padding:4px 8px;border-radius:20px;font-size:12px}
   .s-pendente{background:#333;color:#ddd}
   .s-parcial{background:#312b00;color:#f1c40f}
   .s-quitado{background:#0d2b1b;color:#2ecc71}
   .s-cancelado{background:#2b0d0d;color:#e74c3c}
   .chip{padding:4px 8px;border:1px solid var(--line);border-radius:12px;font-size:12px;background:#101010}
-  .tbl-actions{display:flex;gap:6px;flex-wrap:wrap}
   .btn{height:32px;padding:0 10px;border-radius:6px;border:1px solid var(--line);background:#151515;color:#fff;cursor:pointer}
-  .btn[disabled]{opacity:.6;cursor:not-allowed}
   .btn.ok{background:#0f512f;border-color:#0f512f}
   .btn.warn{background:#513f0f;border-color:#513f0f}
   .btn.danger{background:#512f2f;border-color:#512f2f}
-  .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
-  .muted{color:#9aa0a6;font-size:12px}
-  .msg{margin:10px 0;padding:10px;border-radius:8px;font-size:13px}
-  .msg.err{background:#2b0d0d;border:1px solid #5a1e1e;color:#ffaaaa}
-  .msg.ok{background:#0d2b1b;border:1px solid #1e5a3a;color:#b6ffd0}
-  .loading{padding:16px;text-align:center;color:#9aa0a6}
   .modal{position:fixed;inset:0;background:#0009;display:none;align-items:center;justify-content:center;z-index:9999}
   .modal .box{width:92%;max-width:520px;background:#141414;border:1px solid #242424;border-radius:12px;padding:14px}
-  .box h3{margin:0 0 10px;color:#16D2F2}
-  .box table{width:100%;border-collapse:collapse;background:#0f0f0f;border:1px solid #232323;border-radius:10px;overflow:hidden}
-  .box th,.box td{padding:8px;border-bottom:1px solid #232323;font-size:13px}
-  .box .row{display:flex;justify-content:flex-end;gap:8px;margin-top:10px}
   .link{color:#16D2F2;text-decoration:underline;cursor:pointer}
-  @media (max-width:900px){
-    .cards{grid-template-columns:repeat(2,1fr)}
-    .bar{grid-template-columns:1fr}
-  }
 </style>
 </head>
-<body>
-<div class="wrap">
-  <div class="top">
-    <h1>Admin — Retiro 2026</h1>
-    <button class="primary" id="btnExport">Exportar CSV</button>
-  </div>
 
-  <div id="flash" class="msg" style="display:none"></div>
+<body>
+
+<div class="wrap">
+  <h1>Admin — Retiro 2026</h1>
 
   <div class="cards">
-    <div class="card"><span class="muted">Inscritos</span><strong id="kInscritos">—</strong></div>
-    <div class="card"><span class="muted">Quitados</span><strong id="kQuitados">—</strong></div>
-    <div class="card"><span class="muted">Pendentes/Parcial</span><strong id="kNaoQuitados">—</strong></div>
-    <div class="card"><span class="muted">Vagas restantes</span><strong id="kVagas">—</strong></div>
+    <div class="card"><span>Inscritos</span><strong id="kInscritos">—</strong></div>
+    <div class="card"><span>Quitados</span><strong id="kQuitados">—</strong></div>
+    <div class="card"><span>Pendentes</span><strong id="kNaoQuitados">—</strong></div>
+    <div class="card"><span>Vagas restantes</span><strong id="kVagas">—</strong></div>
   </div>
 
   <div class="bar card">
     <div class="filters">
-      <input id="q" placeholder="Buscar por nome, CPF ou email">
+      <input id="q" placeholder="Buscar nome, CPF ou email">
       <select id="fCampus">
-        <option value="">Todos os campus</option>
+        <option value="">Todos campus</option>
         <option>Antônio Carlos</option>
         <option>Ingleses</option>
         <option>Rio Vermelho</option>
         <option>Sede</option>
         <option>Visitante</option>
-        <option>Não</option>
       </select>
       <select id="fStatus">
-        <option value="">Todos os status</option>
+        <option value="">Todos status</option>
         <option value="pendente">Pendente</option>
         <option value="parcial">Parcial</option>
         <option value="quitado">Quitado</option>
         <option value="cancelado">Cancelado</option>
       </select>
     </div>
-    <div class="muted">Atualiza automaticamente a cada 30s</div>
     <button id="btnReload">Recarregar</button>
   </div>
 
@@ -102,247 +80,160 @@
         <th>Nome</th>
         <th>CPF</th>
         <th>Email</th>
-        <th>Frequenta PV?</th>
         <th>Campus</th>
         <th>Status</th>
         <th>Parcelas</th>
-        <th>QR Code</th>
         <th>Check-in</th>
         <th>Ações</th>
       </tr>
     </thead>
-    <tbody id="lista">
-      <tr><td colspan="11" class="loading">Carregando...</td></tr>
-    </tbody>
+    <tbody id="lista"></tbody>
   </table>
 </div>
 
-<!-- Modal Parcelas -->
+<!-- Modal -->
 <div id="modal" class="modal">
   <div class="box">
-    <h3>Parcelas do inscrito <span id="mId"></span></h3>
+    <h3>Parcelas</h3>
     <div id="mBody">Carregando...</div>
-    <div class="row">
-      <button id="mFechar">Fechar</button>
-    </div>
+    <button onclick="modal.style.display='none'">Fechar</button>
   </div>
 </div>
 
 <script>
-  // ======= CONFIG =======
-  const BASE = 'https://retiro-pulse-2026-backend.onrender.com';
-  // const ADMIN_TOKEN = 'Retiro2026Admin123';
 
-  const HEADERS = {
-    'Content-Type':'application/json',
-    // ...(ADMIN_TOKEN ? {'X-Admin-Token': ADMIN_TOKEN} : {})
+const BASE = 'https://retiro-pulse-2026-backend.onrender.com';
+
+let cache = [];
+
+function badge(status){
+  const map = {
+    pendente:'s-pendente',
+    parcial:'s-parcial',
+    quitado:'s-quitado',
+    cancelado:'s-cancelado'
   };
 
-  // ======= STATE =======
-  let cache = [];
-  const elLista      = document.getElementById('lista');
-  const elQ          = document.getElementById('q');
-  const elFCampus    = document.getElementById('fCampus');
-  const elFStatus    = document.getElementById('fStatus');
-  const elKInscritos = document.getElementById('kInscritos');
-  const elKQuitados  = document.getElementById('kQuitados');
-  const elKNaoQuit   = document.getElementById('kNaoQuitados');
-  const elKVagas     = document.getElementById('kVagas');
-  const elFlash      = document.getElementById('flash');
+  const label = {
+    pendente:'Pendente',
+    parcial:'Parcial',
+    quitado:'Quitado',
+    cancelado:'Cancelado'
+  };
 
-  // Modal refs
-  const modal   = document.getElementById('modal');
-  const mBody   = document.getElementById('mBody');
-  const mId     = document.getElementById('mId');
-  const mClose  = document.getElementById('mFechar');
-  mClose.onclick = ()=> modal.style.display = 'none';
-  modal.addEventListener('click', (e)=>{ if(e.target===modal) modal.style.display='none'; });
+  return `<span class="status ${map[status]}">${label[status]}</span>`;
+}
 
-  function flash(msg, ok=false){
-    elFlash.className = 'msg ' + (ok ? 'ok' : 'err');
-    elFlash.textContent = msg;
-    elFlash.style.display = 'block';
-    clearTimeout(flash._t);
-    flash._t = setTimeout(()=> elFlash.style.display = 'none', 3500);
-  }
+function filtro(p){
+  const q = document.getElementById('q').value.toLowerCase();
+  const c = document.getElementById('fCampus').value;
+  const s = document.getElementById('fStatus').value;
 
-  function badge(status){
-    const map = { pendente:'s-pendente', parcial:'s-parcial', quitado:'s-quitado', cancelado:'s-cancelado' };
-    return `<span class="status ${map[status]||'s-pendente'}">${status}</span>`;
-  }
+  return (!q || [p.nome,p.email,p.cpf].join().toLowerCase().includes(q))
+  && (!c || p.campus === c)
+  && (!s || p.status === s);
+}
 
-  function filtro(item){
-    const q = (elQ.value||'').toLowerCase().trim();
-    const okQ = !q || [item.nome,item.cpf,item.email].some(v => (v||'').toLowerCase().includes(q));
-    const okC = !elFCampus.value || (item.campus||'') === elFCampus.value;
-    const okS = !elFStatus.value || (item.status||'') === elFStatus.value;
-    return okQ && okC && okS;
-  }
+function render(lista){
 
-  function cpfMask(c){
-    const s = (c||'').replace(/\D/g,'');
-    return s.length===11 ? s.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/,'$1.$2.$3-$4') : c||'';
-  }
+  const el = document.getElementById('lista');
+  el.innerHTML = '';
 
-  function render(lista){
-    if (!lista.length) {
-      elLista.innerHTML = `<tr><td colspan="11" class="loading">Sem inscritos para os filtros atuais.</td></tr>`;
-      elKInscritos.textContent = cache.length;
-      elKQuitados.textContent  = cache.filter(x=>x.status==='quitado').length;
-      elKNaoQuit.textContent   = cache.length - cache.filter(x=>x.status==='quitado').length;
-      return;
-    }
-    elLista.innerHTML = '';
-    lista.forEach(p => {
-      const parcelasBtn = `<span class="link" onclick="verParcelas(${p.id})" title="Ver parcelas">ver</span>`;
-      elLista.insertAdjacentHTML('beforeend', `
-        <tr>
-          <td>${p.id}</td>
-          <td>${p.nome||''}</td>
-          <td>${cpfMask(p.cpf)}</td>
-          <td>${p.email||''}</td>
-          <td><span class="chip">${p.frequentaPV||'-'}</span></td>
-          <td><span class="chip">${p.campus||'-'}</span></td>
-          <td>${badge(p.status||'pendente')}</td>
-          <td>${parcelasBtn}</td>
-          <td>${p.qrcode ? `<img src="${p.qrcode}" alt="QR" style="width:70px;height:auto;border-radius:6px;" />` : '-'}</td>
-          <td>${p.checkin ? '✅' : '—'}</td>
-          <td class="tbl-actions">
-            <button class="btn ok"    onclick="setStatus(this, ${p.id}, 'quitado')">Quitado</button>
-            <button class="btn warn"  onclick="setStatus(this, ${p.id}, 'parcial')">Parcial</button>
-            <button class="btn"       onclick="setStatus(this, ${p.id}, 'pendente')">Pendente</button>
-            <button class="btn danger"onclick="setStatus(this, ${p.id}, 'cancelado')">Cancelar</button>
-            <button class="btn"       onclick="toggleCheckin(this, ${p.id}, ${p.checkin?0:1})">${p.checkin?'Remover check-in':'Check-in'}</button>
-          </td>
-        </tr>
-      `);
-    });
+  lista.forEach(p=>{
 
-    const inscritos = cache.length;
-    const quitados  = cache.filter(x=>x.status==='quitado').length;
-    const naoQuit   = inscritos - quitados;
-    elKInscritos.textContent = inscritos;
-    elKQuitados.textContent  = quitados;
-    elKNaoQuit.textContent   = naoQuit;
-  }
+    el.insertAdjacentHTML('beforeend',`
+      <tr>
+        <td>${p.id}</td>
+        <td>${p.nome}</td>
+        <td>${p.cpf}</td>
+        <td>${p.email}</td>
+        <td>${p.campus || '-'}</td>
+        <td>${badge(p.status)}</td>
+        <td><span class="link" onclick="verParcelas(${p.id})">ver</span></td>
+        <td>${p.checkin ? '✅' : '-'}</td>
+        <td>
+          <button class="btn ok" onclick="setStatus(${p.id},'quitado')">Quitado</button>
+        </td>
+      </tr>
+    `);
 
-  async function loadVagas(){
-    try{
-      const r = await fetch(`${BASE}/vagas`);
-      const j = await r.json();
-      elKVagas.textContent = j.restantes ?? '—';
-    }catch(e){ elKVagas.textContent = '—'; }
-  }
-
-  async function carregar(){
-    try{
-      elLista.innerHTML = `<tr><td colspan="11" class="loading">Carregando...</td></tr>`;
-      const res = await fetch(`${BASE}/admin/inscritos`);
-      if (!res.ok) throw new Error(await res.text());
-      cache = await res.json();
-      cache.sort((a,b)=> b.id - a.id);
-      render(cache.filter(filtro));
-      loadVagas();
-    }catch(err){
-      console.error(err);
-      flash('Não foi possível carregar a lista agora. Tente novamente.', false);
-      elLista.innerHTML = `<tr><td colspan="11" class="loading">Erro ao carregar.</td></tr>`;
-    }
-  }
-
-  async function setStatus(btn, id, status){
-    try{
-      btn.disabled = true;
-      await fetch(`${BASE}/admin/status/${id}`, { method:'POST', headers: HEADERS, body: JSON.stringify({status}) });
-      await carregar();
-      flash(`Status do ID ${id} alterado para "${status}".`, true);
-    }catch(e){
-      console.error(e);
-      flash('Falha ao alterar status.', false);
-    }finally{
-      btn.disabled = false;
-    }
-  }
-
-  async function toggleCheckin(btn, id, value){
-    try{
-      btn.disabled = true;
-      await fetch(`${BASE}/admin/checkin/${id}`, { method:'POST', headers: HEADERS, body: JSON.stringify({value}) });
-      await carregar();
-      flash(`${value? 'Check-in efetuado' : 'Check-in removido'} (ID ${id}).`, true);
-    }catch(e){
-      console.error(e);
-      flash('Falha ao registrar check-in.', false);
-    }finally{
-      btn.disabled = false;
-    }
-  }
-
-  async function verParcelas(id){
-    try{
-      document.getElementById('mId').textContent = `#${id}`;
-      modal.style.display = 'flex';
-      mBody.innerHTML = `Carregando...`;
-      const r = await fetch(`${BASE}/admin/parcelas/${id}`);
-      if (!r.ok) throw new Error(await r.text());
-      const list = await r.json();
-
-      if (!list.length) {
-        mBody.innerHTML = `<div class="muted">Sem parcelas para este inscrito.</div>`;
-        return;
-      }
-
-      const pagas = list.filter(p=>p.status==='received').length;
-      const badge = `${pagas}/${list.length}`;
-
-      mBody.innerHTML = `
-        <div class="muted" style="margin-bottom:8px">Situação: <strong>${badge}</strong></div>
-        <table>
-          <thead><tr><th>Parcela</th><th>Vencimento</th><th>Valor (R$)</th><th>Status</th><th>Link</th></tr></thead>
-          <tbody>
-            ${list.map(p => `
-              <tr>
-                <td>${p.parcela}</td>
-                <td>${p.vencimento || '-'}</td>
-                <td>${(p.valor || 0).toFixed(2)}</td>
-                <td>${p.status}</td>
-                <td>${p.boleto_url ? `<a href="${p.boleto_url}" target="_blank" rel="noopener noreferrer">abrir</a>` : '-'}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      `;
-    }catch(e){
-      console.error(e);
-      mBody.innerHTML = `<div class="msg err">Não foi possível carregar as parcelas.</div>`;
-    }
-  }
-
- tListener('change', ()=> render(cache.filter(filtro)));
   });
 
-  document.getElementById('btnReload').onclick = carregar;
-  setInterval(carregar, 30000);
+  document.getElementById('kInscritos').textContent = cache.length;
+  document.getElementById('kQuitados').textContent =
+    cache.filter(x=>x.status==='quitado').length;
 
-  document.getElementById('btnExport').onclick = () => {
-    const rows = [
-      ['id','nome','cpf','email','frequentaPV','campus','status','checkin','criado_em']
-    ];
-    cache.filter(filtro).forEach(p=>{
-      rows.push([p.id,p.nome,cpfMask(p.cpf),p.email,p.frequentaPV||'',p.campus||'',p.status||'',p.checkin||0,p.criado_em||'']);
-    });
-    const csv = rows.map(r=>r.map(v=>{
-      v = (v??'').toString().replaceAll('"','""');
-      return `"${v}"`;
-    }).join(',')).join('\n');
-    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'inscritos-retiro-2026.csv'; a.click();
-    URL.revokeObjectURL(url);
-  };
+  document.getElementById('kNaoQuitados').textContent =
+    cache.filter(x=>x.status!=='quitado').length;
+}
+
+async function carregar(){
+
+  try{
+
+    const r = await fetch(`${BASE}/admin/inscritos`);
+    if(!r.ok) throw new Error(await r.text());
+
+    cache = await r.json();
+
+    render(cache.filter(filtro));
+    loadVagas();
+
+  }catch(e){
+    alert('Erro ao carregar inscritos');
+  }
+
+}
+
+async function loadVagas(){
+
+  try{
+
+    const r = await fetch(`${BASE}/vagas`);
+    if(!r.ok) throw new Error();
+
+    const j = await r.json();
+
+    document.getElementById('kVagas').textContent = j.restantes;
+
+  }catch{}
+}
+
+async function setStatus(id,status){
+
+  await fetch(`${BASE}/admin/status/${id}`,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({status})
+  });
 
   carregar();
+}
+
+async function verParcelas(id){
+
+  const modal = document.getElementById('modal');
+  const body = document.getElementById('mBody');
+
+  modal.style.display = 'flex';
+
+  const r = await fetch(`${BASE}/admin/parcelas/${id}`);
+  const list = await r.json();
+
+  body.innerHTML = list.map(p=>`
+    Parcela ${p.parcela} - R$ ${p.valor} - ${p.status}
+  `).join('<br>');
+}
+
+['q','fCampus','fStatus'].forEach(id=>{
+  document.getElementById(id).addEventListener('input',()=>render(cache.filter(filtro)));
+});
+
+document.getElementById('btnReload').onclick = carregar;
+
+carregar();
+
 </script>
+
 </body>
 </html>
