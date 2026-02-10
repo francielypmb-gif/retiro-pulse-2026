@@ -1,267 +1,172 @@
-<!DOCTYPE html>
+ <!doctype html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8">
-<title>Admin — Retiro 2026</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<style>
-  :root{
-    --bg:#0b0b0b; --card:#141414; --muted:#9aa0a6; --line:#242424;
-    --azul:#16D2F2; --verde:#2ecc71; --amarelo:#f1c40f; --vermelho:#e74c3c;
-  }
-  *{box-sizing:border-box;font-family:Arial,Helvetica,sans-serif}
-  body{background:#000;color:#fff;margin:0;padding:20px}
-  .wrap{max-width:1200px;margin:0 auto}
-  h1{margin:0 0 14px;color:var(--azul);font-size:22px}
-  .bar{display:grid;grid-template-columns:1fr auto auto;gap:12px;margin-bottom:12px}
-  .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px}
-  .card{background:var(--card);border:1px solid var(--line);padding:12px;border-radius:10px}
-  .card strong{display:block;font-size:20px;margin-top:2px}
-  .filters{display:flex;gap:8px;flex-wrap:wrap}
-  input,select,button{height:40px;border-radius:8px;border:1px solid var(--line);background:#111;color:#fff;padding:0 12px}
-  button.primary{background:linear-gradient(90deg,#E6001D,#16D2F2);border:none;font-weight:bold}
-  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line)}
-  th,td{padding:10px;border-bottom:1px solid var(--line);font-size:14px}
-  thead th{background:#111}
-  .status{padding:4px 8px;border-radius:20px;font-size:12px}
-  .s-pendente{background:#333;color:#ddd}
-  .s-parcial{background:#312b00;color:#f1c40f}
-  .s-quitado{background:#0d2b1b;color:#2ecc71}
-  .s-cancelado{background:#2b0d0d;color:#e74c3c}
-  .chip{padding:4px 8px;border:1px solid var(--line);border-radius:12px;font-size:12px;background:#101010}
-  .btn{height:32px;padding:0 10px;border-radius:6px;border:1px solid var(--line);background:#151515;color:#fff;cursor:pointer}
-  .btn.ok{background:#0f512f;border-color:#0f512f}
-  .btn.warn{background:#513f0f;border-color:#513f0f}
-  .btn.danger{background:#512f2f;border-color:#512f2f}
-  .modal{position:fixed;inset:0;background:#0009;display:none;align-items:center;justify-content:center;z-index:9999}
-  .modal .box{width:92%;max-width:520px;background:#141414;border:1px solid #242424;border-radius:12px;padding:14px}
-  .link{color:#16D2F2;text-decoration:underline;cursor:pointer}
-</style>
+  <meta charset="utf-8"/>
+  <title>Painel — Retiro Pulse 2026</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <style>
+    :root { --bg:#0f1115; --panel:#141826; --line:#1f2230; --ink:#e6e6e6; --muted:#9aa0a6; --btn:#1f6feb; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--ink); margin:0; }
+    header { padding:16px 20px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; }
+    h1 { font-size:18px; margin:0; }
+    .container { padding:20px; }
+    .kpis { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-bottom:18px; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; }
+    .card h3 { margin:0 0 6px; font-size:14px; color:var(--muted); }
+    .num { font-size:26px; font-weight:700; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; }
+    .box { flex:1 1 480px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; min-width:340px;}
+    table { width:100%; border-collapse:collapse; }
+    th,td { padding:8px 10px; border-bottom:1px solid #1d2130; font-size:13px; }
+    th { text-align:left; color:var(--muted); }
+    .toolbar { display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap; }
+    input, select, button, a.btn { background:#0f1322; color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:8px 10px; text-decoration:none; }
+    input::placeholder { color:#7c8299; }
+    button.primary, a.btn.primary { background:var(--btn); border-color:var(--btn); cursor:pointer; }
+    .muted { color:var(--muted); font-size:12px; }
+    .badge { padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid #2b3045; background:#0f1322; }
+    @media (max-width:480px){ .box{min-width:100%} }
+  </style>
 </head>
-
 <body>
+  <header>
+    <h1>Painel — Retiro Pulse 2026</h1>
+    <div class="muted">Tempo real (SSE) • Export CSV</div>
+  </header>
 
-<div class="wrap">
-  <h1>Admin — Retiro 2026</h1>
-
-  <div class="cards">
-    <div class="card"><span>Inscritos</span><strong id="kInscritos">—</strong></div>
-    <div class="card"><span>Quitados</span><strong id="kQuitados">—</strong></div>
-    <div class="card"><span>Pendentes</span><strong id="kNaoQuitados">—</strong></div>
-    <div class="card"><span>Vagas restantes</span><strong id="kVagas">—</strong></div>
-  </div>
-
-  <div class="bar card">
-    <div class="filters">
-      <input id="q" placeholder="Buscar nome, CPF ou email">
-      <select id="fCampus">
-        <option value="">Todos campus</option>
-        <option>Antônio Carlos</option>
-        <option>Ingleses</option>
-        <option>Rio Vermelho</option>
-        <option>Sede</option>
-        <option>Visitante</option>
-      </select>
-      <select id="fStatus">
-        <option value="">Todos status</option>
-        <option value="pendente_pagamento">Pendente de pagamento</option>
-        <option value="pendente">Pendente</option>
-        <option value="parcial">Parcial</option>
-        <option value="quitado">Quitado</option>
-        <option value="cancelado">Cancelado</option>
-      </select>
-      <!-- novo filtro de forma de pagamento -->
-      <select id="fPagamento">
-        <option value="">Todas formas</option>
-        <option value="pix">Pix</option>
-        <option value="boleto">Boleto</option>
-        <option value="cartao">Cartão</option>
-      </select>
+  <div class="container">
+    <div class="kpis">
+      <div class="card"><h3>Inscritos (total)</h3><div class="num" id="k_ins_total">—</div></div>
+      <div class="card"><h3>Inscritos quitados</h3><div class="num" id="k_ins_quitados">—</div></div>
+      <div class="card"><h3>Inscritos pendentes</h3><div class="num" id="k_ins_pendentes">—</div></div>
+      <div class="card"><h3>Leads (hoje)</h3><div class="num" id="k_leads_hoje">—</div></div>
+      <div class="card"><h3>Leads (total)</h3><div class="num" id="k_leads_total">—</div></div>
     </div>
-    <button id="btnReload">Recarregar</button>
+
+    <div class="row">
+      <div class="box">
+        <div class="toolbar">
+          <strong>Inscritos</strong>
+          <input id="ins_q" placeholder="Buscar nome/email/cpf" />
+          <select id="ins_status">
+            <option value="">Todos</option>
+            <option value="pendente">Pendente</option>
+            <option value="quitado">Quitado</option>
+            <option value="cancelado">Cancelado</option>
+          </select>
+          <button id="ins_filtrar" class="primary">Filtrar</button>
+          <a id="ins_export" class="btn">Exportar CSV</a>
+        </div>
+        <table id="tbl_ins">
+          <thead><tr><th>ID</th><th>Nome</th><th>Email</th><th>Telefone</th><th>Status</th><th>Criado</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="box">
+        <div class="toolbar">
+          <strong>Leads</strong>
+          <input id="lead_q" placeholder="Buscar nome/email" />
+          <button id="lead_filtrar" class="primary">Filtrar</button>
+          <a id="lead_export" class="btn">Exportar CSV</a>
+        </div>
+        <table id="tbl_leads">
+          <thead><tr><th>ID</th><th>Nome</th><th>Email</th><th>Telefone</th><th>Quando</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
   </div>
 
-  <table>
-    <thead>
-      <tr>
-        <th>ID</th>
-        <th>Nome</th>
-        <th>CPF</th>
-        <th>Email</th>
-        <th>Campus</th>
-        <th>Forma pgto.</th>
-        <th>Status</th>
-        <th>Parcelas</th>
-        <th>Check-in</th>
-        <th>Ações</th>
-      </tr>
-    </thead>
-    <tbody id="lista"></tbody>
-  </table>
-</div>
+  <script>
+    // 🔧 Ajuste apenas esta constante se o backend tiver outro domínio:
+    const API = 'https://retiro-pulse-2026-backend.onrender.com';
+    const TOKEN = prompt('Token do administrador (ADMIN_TOKEN):');
 
-<div id="modal" class="modal">
-  <div class="box">
-    <h3>Parcelas</h3>
-    <div id="mBody">Carregando...</div>
-    <button onclick="closeModal()">Fechar</button>
-  </div>
-</div>
+    function fmt(d) { try { return new Date(d).toLocaleString('pt-BR'); } catch { return d; } }
 
-<script>
-const BASE = 'https://retiro-pulse-2026-backend.onrender.com';
+    async function overview() {
+      const r = await fetch(`${API}/api/admin/overview`, { headers: { 'x-admin-token': TOKEN }});
+      const j = await r.json();
+      if (!r.ok) { alert('Falha overview: ' + (j?.error || r.status)); return; }
+      document.getElementById('k_ins_total').textContent     = j.inscritos_total;
+      document.getElementById('k_ins_quitados').textContent  = j.inscritos_quitados;
+      document.getElementById('k_ins_pendentes').textContent = j.inscritos_pendentes;
+      document.getElementById('k_leads_hoje').textContent    = j.leads_hoje;
+      document.getElementById('k_leads_total').textContent   = j.leads_total;
+      carregarInscritos();
+      carregarLeads();
+    }
 
-let cache = [];
+    async function carregarInscritos(page=1) {
+      const q = document.getElementById('ins_q').value.trim();
+      const status = document.getElementById('ins_status').value;
+      const u = new URL(`${API}/api/admin/inscritos/list`);
+      u.searchParams.set('page', page);
+      u.searchParams.set('size', 20);
+      if (q) u.searchParams.set('q', q);
+      if (status) u.searchParams.set('status', status);
+      const r = await fetch(u, { headers: { 'x-admin-token': TOKEN }});
+      const j = await r.json();
+      if (!r.ok) { console.warn('inscritos list fail', j); return; }
+      const tbody = document.querySelector('#tbl_ins tbody');
+      tbody.innerHTML = j.items.map(it => `
+        <tr>
+          <td>${it.id}</td>
+          <td>${it.nome || ''}</td>
+          <td>${it.email || ''}</td>
+          <td>${it.telefone || ''}</td>
+          <td><span class="badge">${it.status}</span></td>
+          <td>${fmt(it.criado_em)}</td>
+        </tr>`).join('');
+      document.getElementById('ins_export').href = `${API}/api/admin/export/inscritos.csv?token=${encodeURIComponent(TOKEN)}`;
+    }
 
-function badge(status){
-  const s = String(status || '').toLowerCase();
-  const map = {
-    'pendente': 's-pendente',
-    'pendente_pagamento': 's-pendente',
-    'parcial': 's-parcial',
-    'quitado': 's-quitado',
-    'cancelado': 's-cancelado'
-  };
-  const label = {
-    'pendente': 'Pendente',
-    'pendente_pagamento': 'Pendente pgto.',
-    'parcial': 'Parcial',
-    'quitado': 'Quitado',
-    'cancelado': 'Cancelado'
-  };
-  const cls = map[s] || 's-pendente';
-  const txt = label[s] || s || '-';
-  return `<span class="status ${cls}">${txt}</span>`;
-}
+    async function carregarLeads(page=1) {
+      const q = document.getElementById('lead_q').value.trim();
+      const u = new URL(`${API}/api/admin/leads/list`);
+      u.searchParams.set('page', page);
+      u.searchParams.set('size', 20);
+      if (q) u.searchParams.set('q', q);
+      const r = await fetch(u, { headers: { 'x-admin-token': TOKEN }});
+      const j = await r.json();
+      if (!r.ok) { console.warn('leads list fail', j); return; }
+      const tbody = document.querySelector('#tbl_leads tbody');
+      tbody.innerHTML = j.items.map(it => `
+        <tr>
+          <td>${it.id}</td>
+          <td>${it.name || ''}</td>
+          <td>${it.email || ''}</td>
+          <td>${it.phone || ''}</td>
+          <td>${fmt(it.created_at)}</td>
+        </tr>`).join('');
+      document.getElementById('lead_export').href = `${API}/api/admin/export/leads.csv?token=${encodeURIComponent(TOKEN)}`;
+    }
 
-function filtro(p){
-  const q = document.getElementById('q').value.toLowerCase();
-  const c = document.getElementById('fCampus').value;
-  const s = document.getElementById('fStatus').value;
-  const f = document.getElementById('fPagamento').value;
+    document.getElementById('ins_filtrar').addEventListener('click', () => carregarInscritos(1));
+    document.getElementById('lead_filtrar').addEventListener('click', () => carregarLeads(1));
 
-  const hitQ = (!q || [p.nome,p.email,p.cpf].join().toLowerCase().includes(q));
-  const hitC = (!c || p.campus === c);
-  const hitS = (!s || String(p.status).toLowerCase() === s);
-  const hitF = (!f || String(p.forma_pagamento||'').toLowerCase() === f);
+    // 🔴 Tempo real via SSE (com fallback para polling)
+    function conectarSSE() {
+      try {
+        const es = new EventSource(`${API}/api/admin/events?token=${encodeURIComponent(TOKEN)}`, { withCredentials:false });
+        es.onmessage = (ev) => {
+          try {
+            const data = JSON.parse(ev.data);
+            if (data.type === 'lead:new')      carregarLeads();
+            if (data.type === 'inscrito:new')  { carregarInscritos(); overview(); }
+            if (data.type === 'inscrito:update'){ overview(); }
+          } catch {}
+        };
+        es.onerror = () => { es.close(); setTimeout(conectarSSE, 5000); };
+      } catch {
+        // fallback: atualiza KPIs a cada 15s
+        setInterval(() => { overview(); }, 15000);
+      }
+    }
 
-  return hitQ && hitC && hitS && hitF;
-}
-
-function render(lista){
-  const el = document.getElementById('lista');
-  el.innerHTML = '';
-
-  lista.forEach(p=>{
-    const formaChip = p.forma_pagamento
-      ? `<span class="chip">${String(p.forma_pagamento).toUpperCase()}</span>`
-      : '<span class="chip" style="opacity:.6">—</span>';
-
-    el.insertAdjacentHTML('beforeend',`
-      <tr>
-        <td>${p.id}</td>
-        <td>${p.nome}</td>
-        <td>${p.cpf}</td>
-        <td>${p.email}</td>
-        <td>${p.campus || '-'}</td>
-        <td>${formaChip}</td>
-        <td>${badge(p.status)}</td>
-        <td><span class="link" onclick="viewInstallments(${p.id})">ver</span></td>
-        <td>${p.checkin ? '✅' : '-'}</td>
-        <td>
-          <button class="btn ok" onclick="setStatus(${p.id},'quitado')">Quitado</button>
-          <button class="btn warn" onclick="setCheckin(${p.id},1)">Check-in</button>
-          <button class="btn danger" onclick="cancelEntry(${p.id})">Cancelar</button>
-        </td>
-      </tr>
-    `);
-  });
-
-  document.getElementById('kInscritos').textContent = cache.length;
-  document.getElementById('kQuitados').textContent = cache.filter(x=>String(x.status).toLowerCase()==='quitado').length;
-  document.getElementById('kNaoQuitados').textContent = cache.filter(x=>String(x.status).toLowerCase()!=='quitado').length;
-}
-
-async function loadAll(){
-  try{
-    const r = await fetch(`${BASE}/admin/inscritos`);
-    if(!r.ok) throw new Error(await r.text());
-    cache = await r.json();
-    render(cache.filter(filtro));
-    await loadSeats();
-  }catch(e){
-    alert('Erro ao carregar inscritos');
-  }
-}
-
-async function loadSeats(){
-  try{
-    const r = await fetch(`${BASE}/vagas`);
-    if(!r.ok) throw new Error();
-    const j = await r.json();
-    document.getElementById('kVagas').textContent = j.restantes;
-  }catch{}
-}
-
-async function setStatus(id,status){
-  await fetch(`${BASE}/admin/status/${id}`,{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({status})
-  });
-  loadAll();
-}
-
-async function setCheckin(id,value){
-  await fetch(`${BASE}/admin/checkin/${id}`,{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({value})
-  });
-  loadAll();
-}
-
-async function cancelEntry(id){
-  if(!confirm('Deseja cancelar esta inscrição?')) return;
-  await fetch(`${BASE}/admin/cancelar/${id}`,{ method:'POST' });
-  loadAll();
-}
-
-function closeModal(){
-  document.getElementById('modal').style.display = 'none';
-}
-
-async function viewInstallments(id){
-  const modal = document.getElementById('modal');
-  const body = document.getElementById('mBody');
-  modal.style.display = 'flex';
-
-  try{
-    const r = await fetch(`${BASE}/admin/parcelas/${id}`);
-    const list = await r.json();
-
-    if (!list || !list.length) {
-      body.innerHTML = '<span style="color:#9aa0a6">Nenhuma parcela registrada ainda.</span>';
-      return;
-    
-
-    body.innerHTML = list.map(p=>`
-      Parcela ${p.parcela} — R$ ${Number(p.valor||0).toFixed(2)} — ${p.status}
-      ${p.boleto_url ? ` — <a href="${p.boleto_url}" target="_blank" class="link">boleto</a>` : ''}
-    `).join('<br>');
-  }catch(e){
-    body.innerHTML = '<span style="color:#e74c3c">Erro ao carregar parcelas.</span>';
-  }
-}
-
-['q','fCampus','fStatus','fPagamento'].forEach(id=>{
-  document.getElementById(id).addEventListener('input',()=>render(cache.filter(filtro)));
-});
-
-document.getElementById('btnReload').onclick = loadAll;
-
-loadAll();
-</script>
-
+    overview().then(conectarSSE);
+  </script>
 </body>
 </html>

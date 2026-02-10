@@ -4,9 +4,11 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const QRCode = require('qrcode');
+const path = require('path'); // <— necessário para servir /admin-ui
 // Node 18+ tem fetch nativo
 const fetch = (...args) => global.fetch(...args);
 const { Pool } = require('pg');
+const { EventEmitter } = require('events');
 
 const app = express();
 const PORT = process.env.PORT || 3333;
@@ -39,6 +41,10 @@ console.log('[BOOT] CORS infalível carregado');
 app.use(cors());
 app.use(express.json());
 
+// 🔹 Servir a pasta "admin" do repositório em /admin-ui
+//    Ex.: https://.../admin-ui/painel.html
+app.use('/admin-ui', express.static(path.join(process.cwd(), 'admin')));
+
 /* ======================================================================
    CONEXÃO POSTGRES (Render)
 ====================================================================== */
@@ -51,8 +57,16 @@ const pgPool = new Pool({
 });
 
 /* ======================================================================
-   CRIAÇÃO/MIGRAÇÃO DE TABELAS NO POSTGRES
-   - Mantém nomes/colunas compatíveis com o SQLite original
+   EVENTOS (tempo real p/ Admin via SSE)
+====================================================================== */
+const events = new EventEmitter();
+events.setMaxListeners(50);
+function emitEvent(type, payload) {
+  events.emit('evt', { type, payload, at: new Date().toISOString() });
+}
+
+/* ======================================================================
+   CRIAÇÃO/MIGRAÇÃO DE TABELAS + ÍNDICES
 ====================================================================== */
 async function ensureTables() {
   await pgPool.query(`
@@ -98,6 +112,13 @@ async function ensureTables() {
     );
   `);
 
+  // Índices úteis (performance)
+  await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_inscritos_email ON public.inscritos (LOWER(email));`);
+  await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_inscritos_cpf   ON public.inscritos (cpf_norm);`);
+  await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_parcelas_ins    ON public.parcelas (inscrito_id);`);
+  await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_leads_email     ON public.leads (LOWER(email));`);
+  await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_leads_created   ON public.leads (created_at DESC);`);
+
   console.log('✅ [DB] Tabelas prontas (inscritos, parcelas, leads)');
 }
 ensureTables().catch(err => {
@@ -106,7 +127,7 @@ ensureTables().catch(err => {
 });
 
 /* ======================================================================
-   CONFIG ASAAS
+   CONFIG ASAAS (mantido)
 ====================================================================== */
 const ASAAS = {
   baseUrl: process.env.ASAAS_BASE_URL || 'https://sandbox.asaas.com/api/v3',
@@ -149,8 +170,104 @@ app.get('/', (_req, res) => {
 });
 
 /* ======================================================================
-   INSCRIÇÃO (manual: sem disparar pagamentos)
-   → Agora 100% em Postgres
+   EMAILS — LEAD (admin + inscrito, consolidado) e INSCRIÇÃO
+====================================================================== */
+async function enviarEmailsDeLead(lead) {
+  const results = [];
+  try {
+    const apiKey   = (process.env.RESEND_API_KEY || '').trim();
+    const fromAddr = (process.env.EMAIL_FROM || 'retirorpulse@resend.dev').trim();
+    const admins = (process.env.EMAIL_NOTIFICAR || '')
+      .split(',').map(s => s.trim()).filter(Boolean);
+
+    if (!apiKey || admins.length === 0) {
+      console.warn('⚠️ RESEND_API_KEY/EMAIL_NOTIFICAR ausentes – pulando envio de email (lead).');
+      return;
+    }
+
+    // 1 único envio: admin(s) + inscrito
+    const destinatarios = [...admins, (lead.email || '').trim()].filter(Boolean);
+
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        from: fromAddr,
+        to: destinatarios,
+        subject: 'Sua inscrição foi recebida! 🙌',
+        html: `
+          <h2>Inscrição recebida</h2>
+          <p><b>Nome:</b> ${lead.name}</p>
+          <p><b>E-mail:</b> ${lead.email}</p>
+          <p><b>Telefone:</b> ${lead.phone || '—'}</p>
+          <p><b>Origem:</b> ${lead.source || 'landing'}</p>
+          <hr/>
+          <p>Registrado em: ${lead.created_at}</p>
+        `
+      })
+    });
+    const text = await r.text();
+    let body; try { body = JSON.parse(text); } catch { body = { raw: text }; }
+    results.push({ to: destinatarios, ok: r.ok, status: r.status, body });
+    if (!r.ok) throw new Error(`Resend falhou (lead) status ${r.status}`);
+    console.log('📧 Emails (lead) enviados:', JSON.stringify(results));
+  } catch (e) {
+    console.error('❌ Erro ao enviar emails (lead):', e?.message || e);
+    if (results.length) console.error('Detalhes (lead):', JSON.stringify(results));
+  }
+}
+
+async function enviarEmailInscricao({ nome, email, telefone, formaPagamento }) {
+  const results = [];
+  try {
+    const apiKey   = (process.env.RESEND_API_KEY || '').trim();
+    const fromAddr = (process.env.EMAIL_FROM || 'retirorpulse@resend.dev').trim();
+    const admins = (process.env.EMAIL_NOTIFICAR || '')
+      .split(',').map(s => s.trim()).filter(Boolean);
+
+    if (!apiKey || admins.length === 0) {
+      console.warn('⚠️ RESEND_API_KEY/EMAIL_NOTIFICAR ausentes – pulando envio de email (inscrição).');
+      return;
+    }
+
+    const destinatarios = [...admins, (email || '').trim()].filter(Boolean);
+
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        from: fromAddr,
+        to: destinatarios,
+        subject: 'Inscrição confirmada (Retiro 2026)',
+        html: `
+          <h2>Nova inscrição</h2>
+          <p><b>Nome:</b> ${nome}</p>
+          <p><b>E-mail:</b> ${email || '—'}</p>
+          <p><b>Telefone:</b> ${telefone || '—'}</p>
+          <p><b>Forma de pagamento:</b> ${(formaPagamento || '—').toUpperCase()}</p>
+          <hr/>
+          <p>Registrado em: ${new Date().toISOString()}</p>
+        `
+      })
+    });
+    const text = await r.text();
+    let body; try { body = JSON.parse(text); } catch { body = { raw: text }; }
+    results.push({ to: destinatarios, ok: r.ok, status: r.status, body });
+    if (!r.ok) throw new Error(`Resend falhou (inscrição) status ${r.status}`);
+    console.log('📧 Emails (inscrição) enviados:', JSON.stringify(results));
+  } catch (e) {
+    console.error('❌ Erro ao enviar emails (inscrição):', e?.message || e);
+  }
+}
+
+/* ======================================================================
+   INSCRIÇÃO (manual: sem disparar pagamentos) — envia e-mail e evento
 ====================================================================== */
 app.post('/inscricao', async (req, res) => {
   try {
@@ -180,6 +297,11 @@ app.post('/inscricao', async (req, res) => {
       'pendente_pagamento',
       formaPagamento || null
     ]);
+
+    // e-mail admin + inscrito (não bloqueante)
+    enviarEmailInscricao({ nome, email, telefone, formaPagamento }).catch(console.error);
+    // tempo real no painel
+    emitEvent('inscrito:new', { id: rows[0].id, nome, email, formaPagamento });
 
     res.json({ id: rows[0].id });
   } catch (e) {
@@ -315,7 +437,7 @@ app.post('/pagamentos/asaas/boletos/:id', async (req, res) => {
 });
 
 /* ======================================================================
-   WEBHOOK ASAAS
+   WEBHOOK ASAAS (mantido)
 ====================================================================== */
 app.post('/webhook/asaas', async (req, res) => {
   try {
@@ -349,6 +471,7 @@ app.post('/webhook/asaas', async (req, res) => {
           SELECT inscrito_id FROM public.parcelas WHERE asaas_payment_id=$1
         )
       `, [payment.id]);
+      emitEvent('inscrito:update', { asaas_payment_id: payment.id, status: 'quitado' });
     }
 
     return res.json({ ok: true });
@@ -377,118 +500,159 @@ app.get('/vagas', async (_req, res) => {
 });
 
 /* ======================================================================
-   ADMIN
+   ADMIN — Rotas seguras por token + SSE + CSV + listas
 ====================================================================== */
-app.get('/admin/inscritos', async (_req, res) => {
+function adminAuth(req, res, next) {
+  const token = req.headers['x-admin-token'] || req.query.token;
+  if (!process.env.ADMIN_TOKEN) return res.status(503).json({ ok:false, error:'ADMIN_TOKEN não configurado' });
+  if (token !== process.env.ADMIN_TOKEN) return res.status(401).json({ ok:false, error:'unauthorized' });
+  next();
+}
+
+// SSE de eventos (novos leads/inscrições)
+app.get('/api/admin/events', adminAuth, (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-store',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': req.headers.origin || '*'
+  });
+  const onEvt = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+  events.on('evt', onEvt);
+  const ping = setInterval(() => res.write(':\n\n'), 20000);
+  req.on('close', () => { clearInterval(ping); events.removeListener('evt', onEvt); });
+});
+
+// KPIs
+app.get('/api/admin/overview', adminAuth, async (_req, res) => {
   try {
-    const { rows } = await pgPool.query(`SELECT * FROM public.inscritos ORDER BY id DESC`);
-    res.json(rows || []);
-  } catch {
-    res.json([]);
+    const [{ rows: r1 }, { rows: r2 }, { rows: r3 }, { rows: r4 }, { rows: r5 }, { rows: r6 }] = await Promise.all([
+      pgPool.query('SELECT COUNT(*)::int AS total FROM public.inscritos'),
+      pgPool.query("SELECT COUNT(*)::int AS quitados FROM public.inscritos WHERE status='quitado'"),
+      pgPool.query('SELECT COUNT(*)::int AS leads_total FROM public.leads'),
+      pgPool.query("SELECT COUNT(*)::int AS leads_hoje FROM public.leads WHERE created_at::date = now()::date"),
+      pgPool.query('SELECT id, nome, email, status, criado_em FROM public.inscritos ORDER BY id DESC LIMIT 5'),
+      pgPool.query('SELECT id, name, email, created_at FROM public.leads ORDER BY created_at DESC LIMIT 5')
+    ]);
+    res.json({
+      inscritos_total: r1[0].total,
+      inscritos_quitados: r2[0].quitados,
+      inscritos_pendentes: r1[0].total - r2[0].quitados,
+      leads_total: r3[0].leads_total,
+      leads_hoje: r4[0].leads_hoje,
+      ultimos_inscritos: r5,
+      ultimos_leads: r6
+    });
+  } catch (e) {
+    console.error('[overview] err:', e?.message || e);
+    res.status(500).json({ ok:false, error:'overview failed' });
   }
 });
 
-app.post('/admin/status/:id', async (req, res) => {
-  await pgPool.query(`UPDATE public.inscritos SET status=COALESCE($1,status) WHERE id=$2`, [req.body.status, req.params.id]);
-  res.json({ ok: true });
+// Lista Inscritos (filtro/paginação)
+app.get('/api/admin/inscritos/list', adminAuth, async (req, res) => {
+  try {
+    const page  = Math.max(1, parseInt(req.query.page || '1'));
+    const size  = Math.min(100, Math.max(10, parseInt(req.query.size || '20')));
+    const q     = (req.query.q || '').trim();
+    const status = (req.query.status || '').trim();
+
+    const where = [];
+    const args = [];
+    if (q) {
+      args.push(`%${q}%`);
+      where.push("(LOWER(nome) LIKE LOWER($1) OR LOWER(email) LIKE LOWER($1) OR cpf_norm LIKE LOWER($1))");
+    }
+    if (status) {
+      args.push(status);
+      where.push(`status = $${args.length}`);
+    }
+    const sqlWhere = where.length ? ("WHERE " + where.join(" AND ")) : "";
+    args.push(size);
+    args.push((page-1)*size);
+
+    const sql = `
+      SELECT id, nome, email, telefone, status, criado_em, forma_pagamento
+      FROM public.inscritos
+      ${sqlWhere}
+      ORDER BY id DESC
+      LIMIT $${args.length-1} OFFSET $${args.length};
+    `;
+    const { rows } = await pgPool.query(sql, args);
+
+    res.json({ page, size, items: rows });
+  } catch (e) {
+    console.error('[inscritos list] err:', e?.message || e);
+    res.status(500).json({ ok:false, error:'list failed' });
+  }
 });
 
-app.post('/admin/checkin/:id', async (req, res) => {
-  await pgPool.query(`UPDATE public.inscritos SET checkin=COALESCE($1,checkin) WHERE id=$2`, [req.body.value, req.params.id]);
-  res.json({ ok: true });
+// Lista Leads (filtro/paginação)
+app.get('/api/admin/leads/list', adminAuth, async (req, res) => {
+  try {
+    const page  = Math.max(1, parseInt(req.query.page || '1'));
+    const size  = Math.min(100, Math.max(10, parseInt(req.query.size || '20')));
+    const q     = (req.query.q || '').trim();
+
+    const where = [];
+    const args = [];
+    if (q) {
+      args.push(`%${q}%`);
+      where.push("(LOWER(name) LIKE LOWER($1) OR LOWER(email) LIKE LOWER($1))");
+    }
+    const sqlWhere = where.length ? ("WHERE " + where.join(" AND ")) : "";
+
+    args.push(size);
+    args.push((page-1)*size);
+
+    const sql = `
+      SELECT id, name, email, phone, source, created_at
+      FROM public.leads
+      ${sqlWhere}
+      ORDER BY created_at DESC
+      LIMIT $${args.length-1} OFFSET $${args.length};
+    `;
+    const { rows } = await pgPool.query(sql, args);
+
+    res.json({ page, size, items: rows });
+  } catch (e) {
+    console.error('[leads list] err:', e?.message || e);
+    res.status(500).json({ ok:false, error:'list failed' });
+  }
 });
 
-app.get('/admin/parcelas/:id', async (req, res) => {
+// Export CSVs
+app.get('/api/admin/export/inscritos.csv', adminAuth, async (_req, res) => {
   const { rows } = await pgPool.query(`
-    SELECT parcela, vencimento, valor_cents/100.0 as valor, status, boleto_url
-    FROM public.parcelas
-    WHERE inscrito_id=$1
-    ORDER BY parcela ASC
-  `, [req.params.id]);
-  res.json(rows || []);
+    SELECT id, nome, email, telefone, cpf_norm, nascimento, frequentaPV, campus, status, forma_pagamento, criado_em
+    FROM public.inscritos ORDER BY id DESC
+  `);
+  res.setHeader('Content-Type','text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition','attachment; filename="inscritos.csv"');
+  const head = 'id;nome;email;telefone;cpf;nascimento;frequentaPV;campus;status;forma_pagamento;criado_em\n';
+  const body = rows.map(r => [
+    r.id, r.nome, r.email, r.telefone, r.cpf_norm, r.nascimento, r.frequentapv, r.campus, r.status, r.forma_pagamento, r.criado_em?.toISOString?.() || r.criado_em
+  ].map(v => (v==null?'':String(v).replaceAll(';',',').replaceAll('\n',' '))).join(';')).join('\n');
+  res.send(head + body);
 });
 
-app.post('/admin/cancelar/:id', async (req, res) => {
-  await pgPool.query(`UPDATE public.inscritos SET status='cancelado' WHERE id=$1`, [req.params.id]);
-  res.json({ ok: true });
-});
-
-app.post('/admin/editar/:id', async (req, res) => {
-  const { nome, email, telefone, campus } = req.body || {};
-  await pgPool.query(`
-    UPDATE public.inscritos
-    SET nome = COALESCE($1, nome),
-        email = COALESCE($2, email),
-        telefone = COALESCE($3, telefone),
-        campus = COALESCE($4, campus)
-    WHERE id=$5
-  `, [nome, email, telefone, campus, req.params.id]);
-  res.json({ ok: true });
+app.get('/api/admin/export/leads.csv', adminAuth, async (_req, res) => {
+  const { rows } = await pgPool.query(`
+    SELECT id, name, email, phone, source, created_at
+    FROM public.leads ORDER BY created_at DESC
+  `);
+  res.setHeader('Content-Type','text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition','attachment; filename="leads.csv"');
+  const head = 'id;name;email;phone;source;created_at\n';
+  const body = rows.map(r => [
+    r.id, r.name, r.email, r.phone, r.source, r.created_at?.toISOString?.() || r.created_at
+  ].map(v => (v==null?'':String(v).replaceAll(';',',').replaceAll('\n',' '))).join(';')).join('\n');
+  res.send(head + body);
 });
 
 /* ======================================================================
-   LEADS (PostgreSQL) + E-MAIL IMEDIATO PARA VOCÊ E PARA O INSCRITO
+   LEADS — API pública
 ====================================================================== */
-async function enviarEmailsDeLead(lead) {
-  try {
-    if (!process.env.RESEND_API_KEY || !process.env.EMAIL_NOTIFICAR) {
-      console.warn('⚠️ RESEND_API_KEY/EMAIL_NOTIFICAR não configurados – pulando envio de email.');
-      return;
-    }
-    const fromAddr = process.env.EMAIL_FROM || 'retirorpulse@resend.dev';
-
-    // Email para você
-    await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${process.env.RESEND_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        from: fromAddr,
-        to: process.env.EMAIL_NOTIFICAR,
-        subject: "Nova inscrição na landing!",
-        html: `
-          <h2>Nova inscrição</h2>
-          <p><b>Nome:</b> ${lead.name}</p>
-          <p><b>E-mail:</b> ${lead.email}</p>
-          <p><b>Telefone:</b> ${lead.phone || "Não informado"}</p>
-          <p><b>Origem:</b> ${lead.source || "landing"}</p>
-          <hr>
-          <p>Recebido em: ${lead.created_at}</p>
-        `
-      })
-    });
-
-    // Email para o inscrito
-    await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${process.env.RESEND_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        from: fromAddr,
-        to: lead.email,
-        subject: "Sua inscrição foi recebida! 🙌",
-        html: `
-          <h2>Inscrição confirmada!</h2>
-          <p>Olá, <b>${lead.name}</b>! 🎉</p>
-          <p>Sua inscrição no Retiro Pulse 2026 foi recebida com sucesso.</p>
-          <p>Em breve nossa equipe entrará em contato com mais informações.</p>
-          <br>
-          <p>Abraços,<br>Equipe Retiro Pulse</p>
-        `
-      })
-    });
-
-    console.log('📧 Emails enviados com sucesso!');
-  } catch (e) {
-    console.error('Erro ao enviar emails:', e?.message || e);
-  }
-}
-
-// Criação/atualização de lead (idempotência por email)
 app.post('/api/leads', async (req, res) => {
   try {
     const { name, email, phone, source } = req.body || {};
@@ -508,8 +672,9 @@ app.post('/api/leads', async (req, res) => {
     const { rows } = await pgPool.query(sql, [name, email, phone || null, source || null]);
     const lead = rows[0];
 
-    // Envia e‑mails sem travar resposta
+    // e‑mail consolidado e evento p/ painel
     enviarEmailsDeLead(lead).catch(console.error);
+    emitEvent('lead:new', { id: lead.id, name: lead.name, email: lead.email, at: lead.created_at });
 
     res.status(201).json({ ok: true, lead });
   } catch (err) {
@@ -518,7 +683,6 @@ app.post('/api/leads', async (req, res) => {
   }
 });
 
-// Contagem de leads
 app.get('/api/leads/count', async (_req, res) => {
   try {
     const { rows } = await pgPool.query('SELECT COUNT(*)::int AS count FROM public.leads;');
@@ -529,7 +693,6 @@ app.get('/api/leads/count', async (_req, res) => {
   }
 });
 
-// Listagem de leads
 app.get('/api/leads', async (_req, res) => {
   try {
     const { rows } = await pgPool.query('SELECT id, name, email, phone, source, created_at FROM public.leads ORDER BY created_at DESC;');
