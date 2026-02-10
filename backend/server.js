@@ -76,13 +76,13 @@ async function asaas(pathUrl, opts = {}) {
 }
 
 /* ======================================================================
-   BANCO
+   BANCO (SQLite) — mantido para inscritos/parcelas
 ====================================================================== */
 const dbPath = path.join(process.cwd(), 'database.db');
 const db = new sqlite3.Database(dbPath, (err) => {
   if (err) console.error('Erro banco:', err);
   else {
-    console.log('✅ Banco conectado em:', dbPath);
+    console.log('✅ Banco (SQLite) conectado em:', dbPath);
     criarTabelas();
   }
 });
@@ -493,6 +493,110 @@ app.post('/admin/editar/:id', (req, res) => {
   `,
   [nome, email, telefone, campus, req.params.id],
   () => res.json({ ok: true }));
+});
+
+/* ======================================================================
+   LEADS (persistência em PostgreSQL, independente do SQLite existente)
+   - Usa process.env.DATABASE_URL já configurada no Render
+   - Tabela: public.leads (email único para idempotência)
+====================================================================== */
+let Pool;
+try {
+  ({ Pool } = require('pg'));
+} catch (e) {
+  console.error('[LEADS] Pacote "pg" não instalado. Rode: npm i pg');
+}
+
+// Apenas inicializa se houver DATABASE_URL e pg disponível
+let pgPool = null;
+if (Pool && process.env.DATABASE_URL) {
+  pgPool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false }, // Render usa SSL
+  });
+
+  (async () => {
+    try {
+      await pgPool.query(`
+        CREATE TABLE IF NOT EXISTS public.leads (
+          id         BIGSERIAL PRIMARY KEY,
+          name       TEXT NOT NULL,
+          email      TEXT NOT NULL UNIQUE,
+          phone      TEXT,
+          source     TEXT,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+      `);
+      console.log('✅ [LEADS] Tabela public.leads pronta');
+    } catch (err) {
+      console.error('❌ [LEADS] Erro ao criar tabela:', err?.message || err);
+    }
+  })();
+} else {
+  console.warn('⚠️ [LEADS] DATABASE_URL ausente ou pacote "pg" indisponível; rotas de leads ficarão inativas.');
+}
+
+// Helper de resposta quando pg não está configurado
+function ensurePg(res) {
+  if (!pgPool) {
+    res.status(503).json({ ok: false, error: 'Leads indisponível: configure DATABASE_URL no Render.' });
+    return false;
+  }
+  return true;
+}
+
+// Criação/atualização de lead (idempotência por email)
+app.post('/api/leads', async (req, res) => {
+  try {
+    if (!ensurePg(res)) return;
+
+    const { name, email, phone, source } = req.body || {};
+    if (!name || !email) {
+      return res.status(400).json({ ok: false, error: 'Nome e e-mail são obrigatórios.' });
+    }
+
+    const sql = `
+      INSERT INTO public.leads (name, email, phone, source)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (email)
+      DO UPDATE SET name = EXCLUDED.name,
+                    phone = EXCLUDED.phone,
+                    source = EXCLUDED.source
+      RETURNING id, name, email, phone, source, created_at;
+    `;
+    const { rows } = await pgPool.query(sql, [name, email, phone || null, source || null]);
+
+    res.status(201).json({ ok: true, lead: rows[0] });
+  } catch (err) {
+    console.error('[LEADS] POST /api/leads erro:', err?.message || err);
+    res.status(500).json({ ok: false, error: 'Erro interno' });
+  }
+});
+
+// Contagem de leads (para corrigir o contador do front)
+app.get('/api/leads/count', async (_req, res) => {
+  try {
+    if (!ensurePg(res)) return;
+
+    const { rows } = await pgPool.query('SELECT COUNT(*)::int AS count FROM public.leads;');
+    res.json({ count: rows[0].count });
+  } catch (err) {
+    console.error('[LEADS] GET /api/leads/count erro:', err?.message || err);
+    res.status(500).json({ ok: false, error: 'Falha ao contar' });
+  }
+});
+
+// Listagem (para conferência/backup)
+app.get('/api/leads', async (_req, res) => {
+  try {
+    if (!ensurePg(res)) return;
+
+    const { rows } = await pgPool.query('SELECT id, name, email, phone, source, created_at FROM public.leads ORDER BY created_at DESC;');
+    res.json({ leads: rows });
+  } catch (err) {
+    console.error('[LEADS] GET /api/leads erro:', err?.message || err);
+    res.status(500).json({ ok: false, error: 'Falha ao listar' });
+  }
 });
 
 /* ======================================================================
