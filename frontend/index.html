@@ -39,7 +39,21 @@
     <form id="formInscricao" autocomplete="on">
       <input type="text" placeholder="Nome completo" id="nome" required />
       <input type="text" placeholder="CPF" id="cpf" required />
-      <input type="date" id="nascimento" placeholder="Data de nascimento" required />
+
+      <!-- ====== DATA DE NASCIMENTO (AJUSTADO) ====== -->
+      <!-- Campo visível com placeholder dentro do campo -->
+      <input
+        type="text"
+        id="nascimento_display"
+        name="nascimento_display"
+        placeholder="Data de nascimento"
+        autocomplete="bday"
+        required
+      />
+      <!-- Campo oculto enviado ao backend no formato ISO (AAAA-MM-DD) -->
+      <input type="hidden" id="nascimento" name="nascimento" />
+      <!-- ====== FIM AJUSTE ====== -->
+
       <input type="email" placeholder="Email" id="email" required />
       <input type="tel" placeholder="Telefone" id="telefone" required />
 
@@ -82,6 +96,29 @@
         </small>
       </div>
 
+      <!-- ======= DATAS ESCOLHIDAS PARA BOLETO (oculto por enquanto) ======= -->
+      <div id="wrapDatasBoleto" style="display:none; margin-top:8px;">
+        <div id="linhaDataP1" style="margin-bottom:6px;">
+          <label for="dataParcela1" style="display:block; font-size:12px; color:#9aa0a6; margin-bottom:4px;">
+            Data da 1ª parcela (Fev/Mar)
+          </label>
+          <input type="date" id="dataParcela1" />
+        </div>
+
+        <div id="linhaDataP2" style="margin-bottom:6px;">
+          <label for="dataParcela2" style="display:block; font-size:12px; color:#9aa0a6; margin-bottom:4px;">
+            Data da 2ª parcela (Mar)
+          </label>
+          <input type="date" id="dataParcela2" />
+        </div>
+
+        <small style="display:block; color:#9aa0a6;">
+          • A última parcela vence em <strong>01/04/2026</strong> (fixa).<br/>
+          • As datas escolhidas não podem ser no passado.
+        </small>
+      </div>
+      <!-- ======= FIM BLOCO ======= -->
+
       <button type="submit">FINALIZAR INSCRIÇÃO</button>
     </form>
 
@@ -119,8 +156,10 @@
       }
     });
 
+    // Mantém exibição de parcelas só quando "boleto"
     formaPagamento.addEventListener('change', () => {
       wrapParcelas.style.display = (formaPagamento.value === 'boleto') ? 'block' : 'none';
+      atualizarDatasUI();
     });
   </script>
 
@@ -141,9 +180,45 @@
     }
   </script>
 
-  <!-- === SUBMIT: CRIA INSCRIÇÃO + DISPARA PAGAMENTO CONFORME ESCOLHA === -->
+  <!-- === SUBMIT: CRIA INSCRIÇÃO (SEM PAGAMENTO AUTOMÁTICO) === -->
   <script>
     const form = document.getElementById("formInscricao");
+
+    // Datas de boleto (mantidas, mas ocultas por enquanto)
+    const wrapDatasBoleto = document.getElementById('wrapDatasBoleto');
+    const linhaDataP1     = document.getElementById('linhaDataP1');
+    const linhaDataP2     = document.getElementById('linhaDataP2');
+    const dataParcela1    = document.getElementById('dataParcela1');
+    const dataParcela2    = document.getElementById('dataParcela2');
+
+    function hojeMais(dias) {
+      const d = new Date();
+      d.setHours(0,0,0,0);
+      d.setDate(d.getDate() + dias);
+      return d.toISOString().slice(0,10);
+    }
+    const LIMITE_ULTIMA = '2026-04-01';
+    const MIN_DATAS     = hojeMais(2);
+
+    function aplicarLimitesDatas() {
+      [dataParcela1, dataParcela2].forEach(inp => {
+        if (!inp) return;
+        inp.min = MIN_DATAS;
+        inp.max = LIMITE_ULTIMA;
+      });
+    }
+    aplicarLimitesDatas();
+
+    function atualizarDatasUI() {
+      // Como não vamos gerar boletos automaticamente agora, ocultamos as datas:
+      wrapDatasBoleto.style.display = 'none';
+      dataParcela1.value = '';
+      dataParcela2.value = '';
+      // Para reativar no futuro, basta reverter esta função para a lógica de exibir conforme 1x/2x/3x.
+    }
+
+    qtdParcelas.addEventListener('change', atualizarDatasUI);
+    atualizarDatasUI();
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -152,7 +227,6 @@
       const camp  = document.getElementById('campus') ? document.getElementById('campus').value : null;
       const forma = document.getElementById('formaPagamento').value;
 
-      // Payload coerente
       let campusFinal = null;
       if (freq === 'Sim')       campusFinal = camp || null;
       if (freq === 'Visitante') campusFinal = 'Visitante';
@@ -164,7 +238,9 @@
         email: document.getElementById('email').value.trim(),
         telefone: document.getElementById('telefone').value.trim(),
         frequentaPV: freq,
-        campus: campusFinal
+        campus: campusFinal,
+        // >>> Envia a escolha do pagamento para o backend registrar
+        formaPagamento: forma
       };
 
       const botao = form.querySelector('button[type="submit"]');
@@ -173,7 +249,6 @@
       botao.innerText = 'Enviando...';
 
       try {
-        // (Opcional) barrar CPF inválido antes do envio
         if (!cpfValido(dados.cpf)) {
           alert('CPF inválido. Verifique e tente novamente.');
           botao.disabled = false;
@@ -181,16 +256,14 @@
           return;
         }
 
-        // 1) Cria inscrição
+        // Apenas cria a inscrição (sem chamar pagamentos)
         const res = await fetch(`${API}/inscricao`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(dados)
         });
 
-        console.log("[INSCRICAO] status:", res.status);
         const inscText = await res.text();
-        console.log("[INSCRICAO] body:", inscText);
 
         if (res.status === 409) {
           let t; try { t = JSON.parse(inscText); } catch { t = {erro:'CPF duplicado'}; }
@@ -213,83 +286,22 @@
           return;
         }
 
-        let json;
-        try { json = JSON.parse(inscText); } catch {
-          alert("Resposta inesperada da /inscricao.");
-          return;
-        }
-        const inscritoId = json.id;
+        // Mensagem clara para o usuário (sem pagamento automático)
+        const formaHumana =
+          (forma === 'pix') ? 'Pix' :
+          (forma === 'boleto') ? 'Boleto' : 'Cartão';
+        alert(
+          "Inscrição realizada com sucesso!\n\n" +
+          `Você escolheu pagar via ${formaHumana}.\n` +
+          "Enviaremos as instruções de pagamento por e‑mail/WhatsApp em breve."
+        );
 
-        // 2) Pagamento conforme escolha
-        if (forma === 'boleto') {
-          // === BOLETO 1x/2x/3x — última em 01/04/2026 ===
-          try {
-            const r2 = await fetch(`${API}/pagamentos/asaas/boletos/${inscritoId}`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ parcelas: Number(qtdParcelas.value || 3) })
-            });
-
-            console.log("[BOLETOS] status:", r2.status);
-            const text = await r2.text();
-            console.log("[BOLETOS] body:", text);
-
-            let j2; try { j2 = JSON.parse(text); } catch { j2 = { ok:false }; }
-
-            if (r2.ok) {
-              const parcelas = (j2 && j2.parcelas) ? j2.parcelas : [];
-              let msg = "Inscrição criada! Geramos boletos no ASAAS (Sandbox).";
-              if (parcelas.length) {
-                const links = parcelas
-                  .map(p => p.boleto_url ? `\n• Parcela ${p.parcela} (R$ ${p.valor}) — vence ${p.vencimento}: ${p.boleto_url}` : "")
-                  .join("");
-                if (links.trim()) msg += "\n\nLinks dos boletos:" + links;
-              }
-              alert(msg);
-            } else {
-              alert("Inscrição criada, mas houve falha ao gerar os boletos.\n\nDetalhe: " + text.slice(0, 600));
-            }
-          } catch (errBoleto) {
-            console.error("[BOLETOS] fetch erro:", errBoleto);
-            alert("Inscrição criada, mas não conseguimos gerar os boletos agora. A equipe entrará em contato.");
-          }
-
-        } else if (forma === 'pix') {
-          // === PIX À VISTA ===
-          try {
-            const rPix = await fetch(`${API}/pagamentos/asaas/pix/${inscritoId}`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" }
-            });
-
-            const textPix = await rPix.text();
-            console.log("[PIX] status:", rPix.status);
-            console.log("[PIX] body:", textPix);
-
-            let jPix; try { jPix = JSON.parse(textPix); } catch { jPix = { ok:false }; }
-
-            if (rPix.ok && jPix.ok) {
-              abrirPixModal({
-                qrImageBase64: jPix.qrImageBase64 || null,
-                qrPayload: jPix.qrPayload || ''
-              });
-            } else {
-              alert("Inscrição criada! Não foi possível gerar o Pix agora. Tente novamente em instantes.");
-            }
-          } catch (err) {
-            console.error("[PIX] fetch erro:", err);
-            alert("Inscrição criada! Não foi possível gerar o Pix agora.");
-          }
-
-        } else if (forma === 'cartao') {
-          alert("Inscrição criada! O pagamento por cartão será concluído em uma próxima etapa.");
-        }
-
-        // 3) Limpa UI e recarrega vagas
+        // Limpa UI
         form.reset();
         wrapCampus.style.display = 'none';
         campus.removeAttribute('required');
         wrapParcelas.style.display = 'none';
+        wrapDatasBoleto.style.display = 'none';
         carregarVagas();
 
       } catch (err) {
@@ -418,6 +430,73 @@
     }
   </script>
   <!-- ===== FIM MODAL PIX ===== -->
+
+  <!-- ===== SCRIPT DO CAMPO DE DATA (NOVO) ===== -->
+  <script>
+    (function () {
+      const display = document.getElementById('nascimento_display');
+      const hidden  = document.getElementById('nascimento');
+
+      function isoToBr(iso) {
+        if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '';
+        const [y, m, d] = iso.split('-');
+        return `${d}/${m}/${y}`;
+      }
+
+      function brToIso(br) {
+        if (!br || !/^\d{2}\/\d{2}\/\d{4}$/.test(br)) return '';
+        const [d, m, y] = br.split('/');
+        return `${y}-${m}-${d}`;
+      }
+
+      display.addEventListener('focus', () => {
+        display.type = 'date';
+        if (hidden.value) display.value = hidden.value;
+        if (typeof display.showPicker === 'function') {
+          try { display.showPicker(); } catch(_) {}
+        }
+      });
+
+      display.addEventListener('change', () => {
+        if (display.type === 'date' && display.value) {
+          hidden.value = display.value;           // ISO
+          display.type = 'text';
+          display.value = isoToBr(hidden.value);  // Mostra BR
+        }
+      });
+
+      display.addEventListener('blur', () => {
+        if (display.type === 'date') {
+          if (!display.value) {
+            display.type = 'text';
+            display.value = '';
+          } else {
+            hidden.value = display.value;
+            display.type = 'text';
+            display.value = isoToBr(hidden.value);
+          }
+        } else {
+          const iso = brToIso(display.value);
+          if (iso) hidden.value = iso;
+          else if (!display.value) hidden.value = '';
+        }
+      });
+
+      const form = document.getElementById('formInscricao');
+      if (form) {
+        form.addEventListener('reset', () => {
+          hidden.value = '';
+          display.type = 'text';
+          display.value = '';
+        });
+      }
+
+      if (hidden.value) {
+        display.value = isoToBr(hidden.value);
+      }
+    })();
+  </script>
+  <!-- ===== FIM SCRIPT DO CAMPO DE DATA ===== -->
 
 </body>
 </html>

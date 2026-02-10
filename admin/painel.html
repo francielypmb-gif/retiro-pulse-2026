@@ -64,10 +64,18 @@
       </select>
       <select id="fStatus">
         <option value="">Todos status</option>
+        <option value="pendente_pagamento">Pendente de pagamento</option>
         <option value="pendente">Pendente</option>
         <option value="parcial">Parcial</option>
         <option value="quitado">Quitado</option>
         <option value="cancelado">Cancelado</option>
+      </select>
+      <!-- novo filtro de forma de pagamento -->
+      <select id="fPagamento">
+        <option value="">Todas formas</option>
+        <option value="pix">Pix</option>
+        <option value="boleto">Boleto</option>
+        <option value="cartao">Cartão</option>
       </select>
     </div>
     <button id="btnReload">Recarregar</button>
@@ -81,6 +89,7 @@
         <th>CPF</th>
         <th>Email</th>
         <th>Campus</th>
+        <th>Forma pgto.</th>
         <th>Status</th>
         <th>Parcelas</th>
         <th>Check-in</th>
@@ -91,55 +100,62 @@
   </table>
 </div>
 
-<!-- Modal -->
 <div id="modal" class="modal">
   <div class="box">
     <h3>Parcelas</h3>
     <div id="mBody">Carregando...</div>
-    <button onclick="modal.style.display='none'">Fechar</button>
+    <button onclick="closeModal()">Fechar</button>
   </div>
 </div>
 
 <script>
-
 const BASE = 'https://retiro-pulse-2026-backend.onrender.com';
 
 let cache = [];
 
 function badge(status){
+  const s = String(status || '').toLowerCase();
   const map = {
-    pendente:'s-pendente',
-    parcial:'s-parcial',
-    quitado:'s-quitado',
-    cancelado:'s-cancelado'
+    'pendente': 's-pendente',
+    'pendente_pagamento': 's-pendente',
+    'parcial': 's-parcial',
+    'quitado': 's-quitado',
+    'cancelado': 's-cancelado'
   };
-
   const label = {
-    pendente:'Pendente',
-    parcial:'Parcial',
-    quitado:'Quitado',
-    cancelado:'Cancelado'
+    'pendente': 'Pendente',
+    'pendente_pagamento': 'Pendente pgto.',
+    'parcial': 'Parcial',
+    'quitado': 'Quitado',
+    'cancelado': 'Cancelado'
   };
-
-  return `<span class="status ${map[status]}">${label[status]}</span>`;
+  const cls = map[s] || 's-pendente';
+  const txt = label[s] || s || '-';
+  return `<span class="status ${cls}">${txt}</span>`;
 }
 
 function filtro(p){
   const q = document.getElementById('q').value.toLowerCase();
   const c = document.getElementById('fCampus').value;
   const s = document.getElementById('fStatus').value;
+  const f = document.getElementById('fPagamento').value;
 
-  return (!q || [p.nome,p.email,p.cpf].join().toLowerCase().includes(q))
-  && (!c || p.campus === c)
-  && (!s || p.status === s);
+  const hitQ = (!q || [p.nome,p.email,p.cpf].join().toLowerCase().includes(q));
+  const hitC = (!c || p.campus === c);
+  const hitS = (!s || String(p.status).toLowerCase() === s);
+  const hitF = (!f || String(p.forma_pagamento||'').toLowerCase() === f);
+
+  return hitQ && hitC && hitS && hitF;
 }
 
 function render(lista){
-
   const el = document.getElementById('lista');
   el.innerHTML = '';
 
   lista.forEach(p=>{
+    const formaChip = p.forma_pagamento
+      ? `<span class="chip">${String(p.forma_pagamento).toUpperCase()}</span>`
+      : '<span class="chip" style="opacity:.6">—</span>';
 
     el.insertAdjacentHTML('beforeend',`
       <tr>
@@ -148,111 +164,103 @@ function render(lista){
         <td>${p.cpf}</td>
         <td>${p.email}</td>
         <td>${p.campus || '-'}</td>
+        <td>${formaChip}</td>
         <td>${badge(p.status)}</td>
-        <td><span class="link" onclick="verParcelas(${p.id})">ver</span></td>
+        <td><span class="link" onclick="viewInstallments(${p.id})">ver</span></td>
         <td>${p.checkin ? '✅' : '-'}</td>
         <td>
           <button class="btn ok" onclick="setStatus(${p.id},'quitado')">Quitado</button>
-          <!-- ✅ ADIÇÃO: botões extras sem remover o seu -->
           <button class="btn warn" onclick="setCheckin(${p.id},1)">Check-in</button>
-          <button class="btn danger" onclick="cancelar(${p.id})">Cancelar</button>
+          <button class="btn danger" onclick="cancelEntry(${p.id})">Cancelar</button>
         </td>
       </tr>
     `);
-
   });
 
   document.getElementById('kInscritos').textContent = cache.length;
-  document.getElementById('kQuitados').textContent =
-    cache.filter(x=>x.status==='quitado').length;
-
-  document.getElementById('kNaoQuitados').textContent =
-    cache.filter(x=>x.status!=='quitado').length;
+  document.getElementById('kQuitados').textContent = cache.filter(x=>String(x.status).toLowerCase()==='quitado').length;
+  document.getElementById('kNaoQuitados').textContent = cache.filter(x=>String(x.status).toLowerCase()!=='quitado').length;
 }
 
-async function carregar(){
-
+async function loadAll(){
   try{
-
     const r = await fetch(`${BASE}/admin/inscritos`);
     if(!r.ok) throw new Error(await r.text());
-
     cache = await r.json();
-
     render(cache.filter(filtro));
-    loadVagas();
-
+    await loadSeats();
   }catch(e){
     alert('Erro ao carregar inscritos');
   }
-
 }
 
-async function loadVagas(){
-
+async function loadSeats(){
   try{
-
     const r = await fetch(`${BASE}/vagas`);
     if(!r.ok) throw new Error();
-
     const j = await r.json();
-
     document.getElementById('kVagas').textContent = j.restantes;
-
   }catch{}
 }
 
 async function setStatus(id,status){
-
   await fetch(`${BASE}/admin/status/${id}`,{
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({status})
   });
-
-  carregar();
+  loadAll();
 }
 
-// ✅ ADIÇÃO: check-in (função nova)
 async function setCheckin(id,value){
-  await fetch(`${BASE}/admin/checkin/${id]}`,{
+  await fetch(`${BASE}/admin/checkin/${id}`,{
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({value})
   });
-  carregar();
+  loadAll();
 }
 
-// ✅ ADIÇÃO: cancelar (função nova)
-async function cancelar(id){
+async function cancelEntry(id){
   if(!confirm('Deseja cancelar esta inscrição?')) return;
   await fetch(`${BASE}/admin/cancelar/${id}`,{ method:'POST' });
-  carregar();
+  loadAll();
 }
 
-async function verParcelas(id){
+function closeModal(){
+  document.getElementById('modal').style.display = 'none';
+}
 
+async function viewInstallments(id){
   const modal = document.getElementById('modal');
   const body = document.getElementById('mBody');
-
   modal.style.display = 'flex';
 
-  const r = await fetch(`${BASE}/admin/parcelas/${id}`);
-  const list = await r.json();
+  try{
+    const r = await fetch(`${BASE}/admin/parcelas/${id}`);
+    const list = await r.json();
 
-  body.innerHTML = list.map(p=>`
-    Parcela ${p.parcela} - R$ ${p.valor} - ${p.status}
-  `).join('<br>');
+    if (!list || !list.length) {
+      body.innerHTML = '<span style="color:#9aa0a6">Nenhuma parcela registrada ainda.</span>';
+      return;
+    }
+
+    body.innerHTML = list.map(p=>`
+      Parcela ${p.parcela} — R$ ${Number(p.valor||0).toFixed(2)} — ${p.status}
+      ${p.boleto_url ? ` — <a href="${p.boleto_url}" target="_blank" class="link">boleto</a>` : ''}
+    `).join('<br>');
+  }catch(e){
+    body.innerHTML = '<span style="color:#e74c3c">Erro ao carregar parcelas.</span>';
+  }
 }
 
-['q','fCampus','fStatus'].forEach(id=>{
+['q','fCampus','fStatus','fPagamento'].forEach(id=>{
   document.getElementById(id).addEventListener('input',()=>render(cache.filter(filtro)));
 });
 
-document.getElementById('btnReload').onclick = carregar;
+document.getElementById('btnReload').onclick = loadAll;
 
-carregar();
-
+loadAll();
 </script>
 
 </body>
