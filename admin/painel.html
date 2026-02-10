@@ -243,7 +243,7 @@ async function viewInstallments(id){
     if (!list || !list.length) {
       body.innerHTML = '<span style="color:#9aa0a6">Nenhuma parcela registrada ainda.</span>';
       return;
-    }
+    
 
     body.innerHTML = list.map(p=>`
       Parcela ${p.parcela} — R$ ${Number(p.valor||0).toFixed(2)} — ${p.status}
