@@ -12,7 +12,6 @@
   <link rel="stylesheet" href="./css/style.css" />
 </head>
 
-
 <body>
 
   <div class="container">
@@ -20,17 +19,16 @@
     <!-- LOGO / BANNER -->
     <div class="logos">
       <img src="./assets/id-pulse.PNG" alt="Identidade do Retiro" />
-      <!-- Se sua imagem for .png minúsculo, troque para: id-pulse.png -->
     </div>
 
     <!-- TÍTULO -->
     <h1>RETIRO 2026<br/>ATÉ QUANDO?</h1>
 
     <!-- SUBTÍTULO -->
-   <p class="sub">
-  • Dias 03 a 05 de Abril • Palhoça - SC<br>
-  • Valor: <strong>R$ 320,00</strong>
-</p>
+    <p class="sub">
+      • Dias 03 a 05 de Abril • Palhoça - SC<br>
+      • Valor: <strong>R$ 320,00</strong>
+    </p>
 
     <!-- TIMER -->
     <div id="timer" class="timer">
@@ -48,8 +46,7 @@
       <input type="text" placeholder="Nome completo" id="nome" required />
       <input type="text" placeholder="CPF" id="cpf" required />
 
-      <!-- ====== DATA DE NASCIMENTO (AJUSTADO) ====== -->
-      <!-- Campo visível com placeholder dentro do campo -->
+      <!-- ====== DATA DE NASCIMENTO ====== -->
       <input
         type="text"
         id="nascimento_display"
@@ -58,9 +55,8 @@
         autocomplete="bday"
         required
       />
-      <!-- Campo oculto enviado ao backend no formato ISO (AAAA-MM-DD) -->
       <input type="hidden" id="nascimento" name="nascimento" />
-      <!-- ====== FIM AJUSTE ====== -->
+      <!-- ====== FIM ====== -->
 
       <input type="email" placeholder="Email" id="email" required />
       <input type="tel" placeholder="Telefone" id="telefone" required />
@@ -141,8 +137,27 @@
 
   <!-- === CONFIG / UI === -->
   <script>
-    // USE SEMPRE HTTPS do Render (evita Mixed Content na Locaweb)
+    // USE SEMPRE HTTPS do Render (evita Mixed Content)
     const API = 'https://retiro-pulse-2026-backend.onrender.com';
+
+    // 🔔 Envia notificação (admin + inscrito) via /api/leads
+    async function enviarLeadNotificacao({ name, email, phone, source = 'landing' }) {
+      try {
+        const res = await fetch(`${API}/api/leads`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email, phone, source })
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json.ok) {
+          console.warn('[LEAD] falha ao notificar:', json?.error || res.status);
+        } else {
+          console.log('[LEAD] notificação enviada:', json.lead?.id);
+        }
+      } catch (e) {
+        console.warn('[LEAD] erro ao notificar (ignorado):', e?.message || e);
+      }
+    }
 
     const frequentaPV   = document.getElementById('frequentaPV');
     const wrapCampus    = document.getElementById('wrapCampus');
@@ -171,7 +186,7 @@
     });
   </script>
 
-  <!-- === (OPCIONAL, RECOMENDADO) Validação de CPF no navegador === -->
+  <!-- === Validação de CPF (front) === -->
   <script>
     function cpfValido(cpf) {
       const s = (cpf || '').replace(/\D/g, '');
@@ -188,7 +203,7 @@
     }
   </script>
 
-  <!-- === SUBMIT: CRIA INSCRIÇÃO (SEM PAGAMENTO AUTOMÁTICO) === -->
+  <!-- === SUBMIT: CRIA INSCRIÇÃO === -->
   <script>
     const form = document.getElementById("formInscricao");
 
@@ -218,11 +233,9 @@
     aplicarLimitesDatas();
 
     function atualizarDatasUI() {
-      // Como não vamos gerar boletos automaticamente agora, ocultamos as datas:
       wrapDatasBoleto.style.display = 'none';
       dataParcela1.value = '';
       dataParcela2.value = '';
-      // Para reativar no futuro, basta reverter esta função para a lógica de exibir conforme 1x/2x/3x.
     }
 
     qtdParcelas.addEventListener('change', atualizarDatasUI);
@@ -247,7 +260,6 @@
         telefone: document.getElementById('telefone').value.trim(),
         frequentaPV: freq,
         campus: campusFinal,
-        // >>> Envia a escolha do pagamento para o backend registrar
         formaPagamento: forma
       };
 
@@ -264,7 +276,7 @@
           return;
         }
 
-        // Apenas cria a inscrição (sem chamar pagamentos)
+        // 1) Cria inscrição (sem chamar pagamentos)
         const res = await fetch(`${API}/inscricao`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -294,7 +306,7 @@
           return;
         }
 
-        // Mensagem clara para o usuário (sem pagamento automático)
+        // 2) UX para o usuário
         const formaHumana =
           (forma === 'pix') ? 'Pix' :
           (forma === 'boleto') ? 'Boleto' : 'Cartão';
@@ -303,6 +315,14 @@
           `Você escolheu pagar via ${formaHumana}.\n` +
           "Enviaremos as instruções de pagamento por e‑mail/WhatsApp em breve."
         );
+
+        // 3) 🔔 Dispara notificação (admin + inscrito) — não bloqueia
+        enviarLeadNotificacao({
+          name: document.getElementById('nome').value.trim(),
+          email: document.getElementById('email').value.trim(),
+          phone: document.getElementById('telefone').value.trim(),
+          source: 'landing'
+        });
 
         // Limpa UI
         form.reset();
@@ -351,7 +371,7 @@
     }, 1000);
   </script>
 
-  <!-- === VAGAS (consulta backend) === -->
+  <!-- === VAGAS === -->
   <script>
     async function carregarVagas() {
       try {
@@ -437,9 +457,8 @@
       pixModal.style.display = 'flex';
     }
   </script>
-  <!-- ===== FIM MODAL PIX ===== -->
 
-  <!-- ===== SCRIPT DO CAMPO DE DATA (NOVO) ===== -->
+  <!-- ===== SCRIPT DO CAMPO DE DATA ===== -->
   <script>
     (function () {
       const display = document.getElementById('nascimento_display');
@@ -504,7 +523,6 @@
       }
     })();
   </script>
-  <!-- ===== FIM SCRIPT DO CAMPO DE DATA ===== -->
 
 </body>
 </html>

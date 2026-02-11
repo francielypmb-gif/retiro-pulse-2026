@@ -1,0 +1,172 @@
+ <!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"/>
+  <title>Painel — Retiro Pulse 2026</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <style>
+    :root { --bg:#0f1115; --panel:#141826; --line:#1f2230; --ink:#e6e6e6; --muted:#9aa0a6; --btn:#1f6feb; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--ink); margin:0; }
+    header { padding:16px 20px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; }
+    h1 { font-size:18px; margin:0; }
+    .container { padding:20px; }
+    .kpis { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-bottom:18px; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; }
+    .card h3 { margin:0 0 6px; font-size:14px; color:var(--muted); }
+    .num { font-size:26px; font-weight:700; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; }
+    .box { flex:1 1 480px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; min-width:340px;}
+    table { width:100%; border-collapse:collapse; }
+    th,td { padding:8px 10px; border-bottom:1px solid #1d2130; font-size:13px; }
+    th { text-align:left; color:var(--muted); }
+    .toolbar { display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap; }
+    input, select, button, a.btn { background:#0f1322; color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:8px 10px; text-decoration:none; }
+    input::placeholder { color:#7c8299; }
+    button.primary, a.btn.primary { background:var(--btn); border-color:var(--btn); cursor:pointer; }
+    .muted { color:var(--muted); font-size:12px; }
+    .badge { padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid #2b3045; background:#0f1322; }
+    @media (max-width:480px){ .box{min-width:100%} }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Painel — Retiro Pulse 2026</h1>
+    <div class="muted">Tempo real (SSE) • Export CSV</div>
+  </header>
+
+  <div class="container">
+    <div class="kpis">
+      <div class="card"><h3>Inscritos (total)</h3><div class="num" id="k_ins_total">—</div></div>
+      <div class="card"><h3>Inscritos quitados</h3><div class="num" id="k_ins_quitados">—</div></div>
+      <div class="card"><h3>Inscritos pendentes</h3><div class="num" id="k_ins_pendentes">—</div></div>
+      <div class="card"><h3>Leads (hoje)</h3><div class="num" id="k_leads_hoje">—</div></div>
+      <div class="card"><h3>Leads (total)</h3><div class="num" id="k_leads_total">—</div></div>
+    </div>
+
+    <div class="row">
+      <div class="box">
+        <div class="toolbar">
+          <strong>Inscritos</strong>
+          <input id="ins_q" placeholder="Buscar nome/email/cpf" />
+          <select id="ins_status">
+            <option value="">Todos</option>
+            <option value="pendente">Pendente</option>
+            <option value="quitado">Quitado</option>
+            <option value="cancelado">Cancelado</option>
+          </select>
+          <button id="ins_filtrar" class="primary">Filtrar</button>
+          <a id="ins_export" class="btn">Exportar CSV</a>
+        </div>
+        <table id="tbl_ins">
+          <thead><tr><th>ID</th><th>Nome</th><th>Email</th><th>Telefone</th><th>Status</th><th>Criado</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="box">
+        <div class="toolbar">
+          <strong>Leads</strong>
+          <input id="lead_q" placeholder="Buscar nome/email" />
+          <button id="lead_filtrar" class="primary">Filtrar</button>
+          <a id="lead_export" class="btn">Exportar CSV</a>
+        </div>
+        <table id="tbl_leads">
+          <thead><tr><th>ID</th><th>Nome</th><th>Email</th><th>Telefone</th><th>Quando</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 🔧 Ajuste apenas esta constante se o backend tiver outro domínio:
+    const API = 'https://retiro-pulse-2026-backend.onrender.com';
+    const TOKEN = prompt('Token do administrador (ADMIN_TOKEN):');
+
+    function fmt(d) { try { return new Date(d).toLocaleString('pt-BR'); } catch { return d; } }
+
+    async function overview() {
+      const r = await fetch(`${API}/api/admin/overview`, { headers: { 'x-admin-token': TOKEN }});
+      const j = await r.json();
+      if (!r.ok) { alert('Falha overview: ' + (j?.error || r.status)); return; }
+      document.getElementById('k_ins_total').textContent     = j.inscritos_total;
+      document.getElementById('k_ins_quitados').textContent  = j.inscritos_quitados;
+      document.getElementById('k_ins_pendentes').textContent = j.inscritos_pendentes;
+      document.getElementById('k_leads_hoje').textContent    = j.leads_hoje;
+      document.getElementById('k_leads_total').textContent   = j.leads_total;
+      carregarInscritos();
+      carregarLeads();
+    }
+
+    async function carregarInscritos(page=1) {
+      const q = document.getElementById('ins_q').value.trim();
+      const status = document.getElementById('ins_status').value;
+      const u = new URL(`${API}/api/admin/inscritos/list`);
+      u.searchParams.set('page', page);
+      u.searchParams.set('size', 20);
+      if (q) u.searchParams.set('q', q);
+      if (status) u.searchParams.set('status', status);
+      const r = await fetch(u, { headers: { 'x-admin-token': TOKEN }});
+      const j = await r.json();
+      if (!r.ok) { console.warn('inscritos list fail', j); return; }
+      const tbody = document.querySelector('#tbl_ins tbody');
+      tbody.innerHTML = j.items.map(it => `
+        <tr>
+          <td>${it.id}</td>
+          <td>${it.nome || ''}</td>
+          <td>${it.email || ''}</td>
+          <td>${it.telefone || ''}</td>
+          <td><span class="badge">${it.status}</span></td>
+          <td>${fmt(it.criado_em)}</td>
+        </tr>`).join('');
+      document.getElementById('ins_export').href = `${API}/api/admin/export/inscritos.csv?token=${encodeURIComponent(TOKEN)}`;
+    }
+
+    async function carregarLeads(page=1) {
+      const q = document.getElementById('lead_q').value.trim();
+      const u = new URL(`${API}/api/admin/leads/list`);
+      u.searchParams.set('page', page);
+      u.searchParams.set('size', 20);
+      if (q) u.searchParams.set('q', q);
+      const r = await fetch(u, { headers: { 'x-admin-token': TOKEN }});
+      const j = await r.json();
+      if (!r.ok) { console.warn('leads list fail', j); return; }
+      const tbody = document.querySelector('#tbl_leads tbody');
+      tbody.innerHTML = j.items.map(it => `
+        <tr>
+          <td>${it.id}</td>
+          <td>${it.name || ''}</td>
+          <td>${it.email || ''}</td>
+          <td>${it.phone || ''}</td>
+          <td>${fmt(it.created_at)}</td>
+        </tr>`).join('');
+      document.getElementById('lead_export').href = `${API}/api/admin/export/leads.csv?token=${encodeURIComponent(TOKEN)}`;
+    }
+
+    document.getElementById('ins_filtrar').addEventListener('click', () => carregarInscritos(1));
+    document.getElementById('lead_filtrar').addEventListener('click', () => carregarLeads(1));
+
+    // 🔴 Tempo real via SSE (com fallback para polling)
+    function conectarSSE() {
+      try {
+        const es = new EventSource(`${API}/api/admin/events?token=${encodeURIComponent(TOKEN)}`, { withCredentials:false });
+        es.onmessage = (ev) => {
+          try {
+            const data = JSON.parse(ev.data);
+            if (data.type === 'lead:new')      carregarLeads();
+            if (data.type === 'inscrito:new')  { carregarInscritos(); overview(); }
+            if (data.type === 'inscrito:update'){ overview(); }
+          } catch {}
+        };
+        es.onerror = () => { es.close(); setTimeout(conectarSSE, 5000); };
+      } catch {
+        // fallback: atualiza KPIs a cada 15s
+        setInterval(() => { overview(); }, 15000);
+      }
+    }
+
+    overview().then(conectarSSE);
+  </script>
+</body>
+</html>
