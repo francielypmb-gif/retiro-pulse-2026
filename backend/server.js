@@ -2,13 +2,13 @@
 require('dotenv').config();
 
 const express = require('express');
-const cors = require('cors');
+// const cors = require('cors'); // ❌ Removido para evitar duplicidade (usaremos CORS custom)
 const QRCode = require('qrcode');
-const path = require('path'); // <— necessário para servir /admin-ui
-// Node 18+ tem fetch nativo
-const fetch = (...args) => global.fetch(...args);
+const path = require('path');
+const fetch = globalThis.fetch; // Node 18+ tem fetch nativo
 const { Pool } = require('pg');
 const { EventEmitter } = require('events');
+const { google } = require('googleapis');
 
 const app = express();
 const PORT = process.env.PORT || 3333;
@@ -38,7 +38,6 @@ app.options('*', (req, res) => {
 });
 console.log('[BOOT] CORS infalível carregado');
 
-app.use(cors());
 app.use(express.json());
 
 // 🔹 Servir a pasta "admin" do repositório em /admin-ui
@@ -63,6 +62,74 @@ const events = new EventEmitter();
 events.setMaxListeners(50);
 function emitEvent(type, payload) {
   events.emit('evt', { type, payload, at: new Date().toISOString() });
+}
+
+/* ======================================================================
+   GOOGLE SHEETS BACKUP (defensivo)
+   - Compartilhar a planilha com:
+     backup-retiro@inscricoesretiro2026.iam.gserviceaccount.com (Editor)
+   - A aba deve se chamar exatamente: inscritos
+====================================================================== */
+const SHEET_ID = '1EpvUxWruk7aIEx9ZMWMdysXbvHJWewGLeR90Ri1ytsg';
+const SHEET_TAB = 'inscritos';
+
+let sheets = null;
+(function initSheets() {
+  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  if (!raw) {
+    console.warn('⚠️ GOOGLE_SERVICE_ACCOUNT_JSON ausente – backup no Sheets desabilitado.');
+    return;
+  }
+  try {
+    const fixed = raw.replace(/\\n/g, '\n'); // caso o Render salve com \n escapado
+    const creds = JSON.parse(fixed);
+
+    const googleAuth = new google.auth.GoogleAuth({
+      credentials: creds,
+      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    });
+
+    sheets = google.sheets({ version: 'v4', auth: googleAuth });
+    console.log('✅ Google Sheets pronto');
+  } catch (e) {
+    console.error('❌ Falha ao inicializar Google Sheets:', e?.message || e);
+  }
+})();
+
+async function salvarBackupSheets(dados, attempt = 1) {
+  if (!sheets) return; // silencioso se desabilitado
+  try {
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SHEET_ID,
+      range: `${SHEET_TAB}!A2`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: {
+        values: [[
+          dados.id,
+          dados.nome,
+          dados.cpf,
+          dados.nascimento,
+          dados.email,
+          dados.telefone,
+          dados.frequentaPV,
+          dados.campus,
+          dados.formaPagamento,
+          dados.status,
+          new Date().toISOString()
+        ]]
+      }
+    });
+    console.log('✅ Backup Google Sheets salvo');
+  } catch (e) {
+    const status = e?.response?.status || 0;
+    if (attempt < 3 && (status === 429 || status >= 500)) {
+      const wait = 300 * attempt;
+      console.warn(`⚠️ Sheets retry ${attempt} em ${wait}ms`);
+      await new Promise(r => setTimeout(r, wait));
+      return salvarBackupSheets(dados, attempt + 1);
+    }
+    console.error('❌ Backup Sheets falhou:', e?.message || e);
+  }
 }
 
 /* ======================================================================
@@ -127,7 +194,7 @@ ensureTables().catch(err => {
 });
 
 /* ======================================================================
-   CONFIG ASAAS (mantido)
+   CONFIG ASAAS
 ====================================================================== */
 const ASAAS = {
   baseUrl: process.env.ASAAS_BASE_URL || 'https://sandbox.asaas.com/api/v3',
@@ -166,7 +233,7 @@ async function getOrCreateCustomer(nome, email, cpf) {
    HOME
 ====================================================================== */
 app.get('/', (_req, res) => {
-  res.send('🔥 Backend Retiro rodando (PostgreSQL)');
+  res.send('🔥 Backend Retiro rodando (PostgreSQL + Sheets backup)');
 });
 
 /* ======================================================================
@@ -298,12 +365,28 @@ app.post('/inscricao', async (req, res) => {
       formaPagamento || null
     ]);
 
+    const id = rows[0].id;
+
     // e-mail admin + inscrito (não bloqueante)
     enviarEmailInscricao({ nome, email, telefone, formaPagamento }).catch(console.error);
     // tempo real no painel
-    emitEvent('inscrito:new', { id: rows[0].id, nome, email, formaPagamento });
+    emitEvent('inscrito:new', { id, nome, email, formaPagamento });
 
-    res.json({ id: rows[0].id });
+    // backup best-effort (não bloqueia resposta)
+    salvarBackupSheets({
+      id,
+      nome,
+      cpf,
+      nascimento,
+      email,
+      telefone,
+      frequentaPV,
+      campus,
+      formaPagamento,
+      status: 'pendente_pagamento'
+    }).catch(() => {});
+
+    res.json({ id });
   } catch (e) {
     console.error('[INSCRICAO] erro:', e?.message || e);
     res.status(500).json({ erro: 'Erro interno' });
@@ -437,7 +520,7 @@ app.post('/pagamentos/asaas/boletos/:id', async (req, res) => {
 });
 
 /* ======================================================================
-   WEBHOOK ASAAS (mantido)
+   WEBHOOK ASAAS
 ====================================================================== */
 app.post('/webhook/asaas', async (req, res) => {
   try {
@@ -624,7 +707,10 @@ app.get('/api/admin/leads/list', adminAuth, async (req, res) => {
 // Export CSVs
 app.get('/api/admin/export/inscritos.csv', adminAuth, async (_req, res) => {
   const { rows } = await pgPool.query(`
-    SELECT id, nome, email, telefone, cpf_norm, nascimento, frequentaPV, campus, status, forma_pagamento, criado_em
+    SELECT
+      id, nome, email, telefone, cpf_norm, nascimento,
+      frequentaPV AS frequentapv,
+      campus, status, forma_pagamento, criado_em
     FROM public.inscritos ORDER BY id DESC
   `);
   res.setHeader('Content-Type','text/csv; charset=utf-8');
