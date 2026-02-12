@@ -2,7 +2,7 @@
 require('dotenv').config();
 
 const express = require('express');
-// const cors = require('cors'); // (desnecessário: CORS custom abaixo)
+// const cors = require('cors'); // Desnecessário: CORS custom abaixo
 const QRCode = require('qrcode');
 const path = require('path');
 const fetch = globalThis.fetch; // Node 18+ tem fetch nativo
@@ -75,26 +75,26 @@ const SHEET_TAB = 'inscritos';
 
 let sheets = null;
 (function initSheets() {
-  // Preferimos a variável em Base64, se existir
-  const rawB64 = process.env.GOOGLE_SERVICE_ACCOUNT_JSON_B64;
-  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-
-  if (!rawB64 && !raw) {
-    console.warn('⚠️ GOOGLE_SERVICE_ACCOUNT_JSON(_B64) ausente – backup no Sheets desabilitado.');
-    return;
-  }
-
-  let creds;
   try {
+    // Preferimos a variável em Base64, se existir
+    const rawB64 = process.env.GOOGLE_SERVICE_ACCOUNT_JSON_B64;
+    const rawJSON = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+
+    if (!rawB64 && !rawJSON) {
+      console.warn('⚠️ GOOGLE_SERVICE_ACCOUNT_JSON(_B64) ausente – backup no Sheets desabilitado.');
+      return;
+    }
+
+    let creds;
     if (rawB64) {
       const decoded = Buffer.from(rawB64, 'base64').toString('utf8');
       creds = JSON.parse(decoded);
       console.log('🔐 Sheets: usando GOOGLE_SERVICE_ACCOUNT_JSON_B64');
     } else {
-      // Tenta JSON puro com normalizações usuais
-      let fixed = (raw || '').trim();
+      // Tenta JSON puro com algumas normalizações usuais
+      let fixed = (rawJSON || '').trim();
 
-      // remove aspas externas, se o JSON veio como string inteira
+      // remove aspas externas, caso alguém tenha colocado o JSON inteiro como string
       if ((fixed.startsWith('"') && fixed.endsWith('"')) || (fixed.startsWith("'") && fixed.endsWith("'"))) {
         fixed = fixed.slice(1, -1);
       }
@@ -110,7 +110,7 @@ let sheets = null;
           creds = JSON.parse(fixed1);
           console.log('🔐 Sheets: usando GOOGLE_SERVICE_ACCOUNT_JSON (\\n normalizado)');
         } catch {
-          // se colaram quebras de linha literais, escapa para \n
+          // por fim, se colaram quebras de linha literais, escapa para \n
           const fixed2 = fixed.replace(/\r?\n/g, '\\n');
           creds = JSON.parse(fixed2);
           console.log('🔐 Sheets: usando GOOGLE_SERVICE_ACCOUNT_JSON (newlines escapados)');
@@ -830,7 +830,7 @@ app.get('/api/leads/count', async (_req, res) => {
 app.get('/api/leads', async (_req, res) => {
   try {
     const { rows } = await pgPool.query('SELECT id, name, email, phone, source, created_at FROM public.leads ORDER BY created_at DESC;');
-  res.json({ leads: rows });
+    res.json({ leads: rows });
   } catch (err) {
     console.error('[LEADS] GET /api/leads erro:', err?.message || err);
     res.status(500).json({ ok: false, error: 'Falha ao listar' });
