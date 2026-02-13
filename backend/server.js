@@ -45,7 +45,7 @@ app.use(express.json());
 app.use('/admin-ui', express.static(path.join(process.cwd(), 'admin')));
 
 /* ======================================================================
-   CONEXÃO POSTGRES (Render)
+   CONEXÃO POSTGRES
 ====================================================================== */
 if (!process.env.DATABASE_URL) {
   console.warn('⚠️ DATABASE_URL não definida. Configure no Render.');
@@ -91,7 +91,7 @@ let sheets = null;
       creds = JSON.parse(decoded);
       console.log('🔐 Sheets: usando GOOGLE_SERVICE_ACCOUNT_JSON_B64');
     } else {
-      // Tenta JSON puro com algumas normalizações usuais
+      // Tenta JSON puro com normalizações usuais
       let fixed = (rawJSON || '').trim();
 
       // remove aspas externas, caso alguém tenha colocado o JSON inteiro como string
@@ -130,26 +130,36 @@ let sheets = null;
   }
 })();
 
+// Hardening: evita que Sheets “interprete” CPF/telefone; usa RAW + força texto
 async function salvarBackupSheets(dados, attempt = 1) {
   if (!sheets) return; // silencioso se desabilitado
   try {
+    const asText = v => (v == null ? '' : String(v));
+    const forceText = v => (v == null ? '' : "'" + String(v)); // força texto no Sheets
+
+    const criadoLocal = new Intl.DateTimeFormat('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit'
+    }).format(new Date());
+
     await sheets.spreadsheets.values.append({
       spreadsheetId: SHEET_ID,
       range: `${SHEET_TAB}!A2`,
-      valueInputOption: 'USER_ENTERED',
+      valueInputOption: 'RAW',
       requestBody: {
         values: [[
-          dados.id,
-          dados.nome,
-          dados.cpf,
-          dados.nascimento,
-          dados.email,
-          dados.telefone,
-          dados.frequentaPV,
-          dados.campus,
-          dados.formaPagamento,
-          dados.status,
-          new Date().toISOString()
+          asText(dados.id),
+          asText(dados.nome),
+          forceText(dados.cpf),
+          asText(dados.nascimento),
+          asText(dados.email),
+          forceText(dados.telefone),
+          asText(dados.frequentaPV),
+          asText(dados.campus),
+          asText(dados.formaPagamento),
+          asText(dados.status),
+          criadoLocal
         ]]
       }
     });
@@ -226,6 +236,33 @@ ensureTables().catch(err => {
   console.error('❌ [DB] Erro ao garantir tabelas:', err?.message || err);
   process.exit(1);
 });
+
+// ❇️ Migrações extras (idempotentes) — autonomia no painel
+(async function alterTablesSoftly() {
+  try {
+    await pgPool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_schema='public' AND table_name='inscritos' AND column_name='canceled_at') THEN
+          ALTER TABLE public.inscritos ADD COLUMN canceled_at TIMESTAMPTZ;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_schema='public' AND table_name='inscritos' AND column_name='cancel_reason') THEN
+          ALTER TABLE public.inscritos ADD COLUMN cancel_reason TEXT;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_schema='public' AND table_name='inscritos' AND column_name='updated_at') THEN
+          ALTER TABLE public.inscritos ADD COLUMN updated_at TIMESTAMPTZ;
+        END IF;
+      END$$;
+    `);
+    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_inscritos_status ON public.inscritos (status);`);
+    console.log('✅ [DB] Colunas extras aplicadas (canceled_at, cancel_reason, updated_at)');
+  } catch (e) {
+    console.warn('⚠️ [DB] alterTablesSoftly:', e?.message || e);
+  }
+})();
 
 /* ======================================================================
    CONFIG ASAAS
@@ -690,24 +727,25 @@ app.get('/api/admin/inscritos/list', adminAuth, async (req, res) => {
 
     const where = [];
     const args = [];
+    let argi = 1;
+
     if (q) {
+      where.push(`(LOWER(nome) LIKE LOWER($${argi}) OR LOWER(email) LIKE LOWER($${argi}) OR cpf_norm LIKE $${argi})`);
       args.push(`%${q}%`);
-      where.push("(LOWER(nome) LIKE LOWER($1) OR LOWER(email) LIKE LOWER($1) OR cpf_norm LIKE LOWER($1))");
+      argi++;
     }
     if (status) {
-      args.push(status);
-      where.push(`status = $${args.length}`);
+      where.push(`status = $${argi}`); args.push(status); argi++;
     }
     const sqlWhere = where.length ? ("WHERE " + where.join(" AND ")) : "";
-    args.push(size);
-    args.push((page-1)*size);
+    args.push(size); args.push((page-1)*size);
 
     const sql = `
       SELECT id, nome, email, telefone, status, criado_em, forma_pagamento
       FROM public.inscritos
       ${sqlWhere}
       ORDER BY id DESC
-      LIMIT $${args.length-1} OFFSET $${args.length};
+      LIMIT $${argi} OFFSET $${argi+1};
     `;
     const { rows } = await pgPool.query(sql, args);
 
@@ -727,9 +765,12 @@ app.get('/api/admin/leads/list', adminAuth, async (req, res) => {
 
     const where = [];
     const args = [];
+    let argi = 1;
+
     if (q) {
-      args.push(`%${q}%`);
       where.push("(LOWER(name) LIKE LOWER($1) OR LOWER(email) LIKE LOWER($1))");
+      args.push(`%${q}%`);
+      argi++;
     }
     const sqlWhere = where.length ? ("WHERE " + where.join(" AND ")) : "";
 
@@ -741,7 +782,7 @@ app.get('/api/admin/leads/list', adminAuth, async (req, res) => {
       FROM public.leads
       ${sqlWhere}
       ORDER BY created_at DESC
-      LIMIT $${args.length-1} OFFSET $${args.length};
+      LIMIT $${argi} OFFSET $${argi+1};
     `;
     const { rows } = await pgPool.query(sql, args);
 
@@ -755,10 +796,9 @@ app.get('/api/admin/leads/list', adminAuth, async (req, res) => {
 // Export CSVs
 app.get('/api/admin/export/inscritos.csv', adminAuth, async (_req, res) => {
   const { rows } = await pgPool.query(`
-    SELECT
-      id, nome, email, telefone, cpf_norm, nascimento,
-      frequentaPV AS frequentapv,
-      campus, status, forma_pagamento, criado_em
+    SELECT id, nome, email, telefone, cpf_norm, nascimento,
+           frequentaPV AS frequentapv,
+           campus, status, forma_pagamento, criado_em
     FROM public.inscritos ORDER BY id DESC
   `);
   res.setHeader('Content-Type','text/csv; charset=utf-8');
@@ -782,6 +822,158 @@ app.get('/api/admin/export/leads.csv', adminAuth, async (_req, res) => {
     r.id, r.name, r.email, r.phone, r.source, r.created_at?.toISOString?.() || r.created_at
   ].map(v => (v==null?'':String(v).replaceAll(';',',').replaceAll('\n',' '))).join(';')).join('\n');
   res.send(head + body);
+});
+
+/* ======================================================================
+   ADMIN — Inscritos: detalhes, editar, cancelar, restaurar, check-in
+====================================================================== */
+
+// Detalhe
+app.get('/api/admin/inscritos/:id', adminAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { rows } = await pgPool.query(`
+      SELECT id, nome, cpf, cpf_norm, nascimento, email, telefone, frequentaPV, campus, status, forma_pagamento,
+             qrcode, checkin, criado_em, updated_at, canceled_at, cancel_reason
+      FROM public.inscritos WHERE id=$1
+    `, [id]);
+    if (!rows.length) return res.status(404).json({ ok:false, error:'not found' });
+    res.json({ ok:true, item: rows[0] });
+  } catch (e) {
+    res.status(500).json({ ok:false, error:'detail failed' });
+  }
+});
+
+// Editar (parcial)
+app.put('/api/admin/inscritos/:id', adminAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const fields = {
+      nome: req.body?.nome,
+      email: req.body?.email,
+      telefone: req.body?.telefone,
+      frequentaPV: req.body?.frequentaPV,
+      campus: req.body?.campus,
+      forma_pagamento: req.body?.forma_pagamento,
+      nascimento: req.body?.nascimento
+    };
+    const sets = [];
+    const args = [];
+    let i = 1;
+    for (const [k, v] of Object.entries(fields)) {
+      if (typeof v !== 'undefined') {
+        sets.push(`${k}=$${i++}`);
+        args.push(v === '' ? null : v);
+      }
+    }
+    sets.push(`updated_at=NOW()`);
+    args.push(id);
+
+    if (sets.length === 1) return res.json({ ok:true, updated:0 }); // só updated_at
+
+    const sql = `UPDATE public.inscritos SET ${sets.join(',')} WHERE id=$${i} RETURNING id`;
+    const { rows } = await pgPool.query(sql, args);
+    if (!rows.length) return res.status(404).json({ ok:false, error:'not found' });
+
+    emitEvent('inscrito:update', { id, type:'edit' });
+    res.json({ ok:true, id });
+  } catch (e) {
+    console.error('[admin edit] err:', e?.message || e);
+    res.status(500).json({ ok:false, error:'edit failed' });
+  }
+});
+
+// Cancelar inscrição (best-effort: marca parcelas pendentes como CANCELLED e tenta cancelar no Asaas)
+app.post('/api/admin/inscritos/:id/cancel', adminAuth, async (req, res) => {
+  const client = await pgPool.connect();
+  try {
+    const id = Number(req.params.id);
+    const reason = (req.body?.reason || '').trim().slice(0, 300) || null;
+
+    await client.query('BEGIN');
+
+    const u = await client.query(`
+      UPDATE public.inscritos
+      SET status='cancelado', canceled_at=NOW(), cancel_reason=$2, updated_at=NOW()
+      WHERE id=$1
+      RETURNING id
+    `, [id, reason]);
+    if (!u.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok:false, error:'not found' });
+    }
+
+    const { rows: pendentes } = await client.query(`
+      SELECT id, asaas_payment_id FROM public.parcelas
+      WHERE inscrito_id=$1 AND COALESCE(status,'') ILIKE 'PEND%'
+    `, [id]);
+
+    for (const p of pendentes) {
+      if (p.asaas_payment_id) {
+        try { await asaas(`/payments/${p.asaas_payment_id}/cancel`, { method: 'POST' }); }
+        catch (e) { console.warn('[asaas cancel warn]', String(e?.message || e).slice(0, 160)); }
+      }
+    }
+
+    await client.query(`
+      UPDATE public.parcelas
+      SET status='CANCELLED'
+      WHERE inscrito_id=$1 AND COALESCE(status,'') ILIKE 'PEND%'
+    `, [id]);
+
+    await client.query('COMMIT');
+
+    emitEvent('inscrito:update', { id, status:'cancelado', reason });
+    res.json({ ok:true, id });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    console.error('[admin cancel] err:', e?.message || e);
+    res.status(500).json({ ok:false, error:'cancel failed' });
+  } finally {
+    client.release();
+  }
+});
+
+// Restaurar inscrição
+app.post('/api/admin/inscritos/:id/restore', adminAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const toStatus = (req.body?.status || 'pendente_pagamento').trim();
+
+    const { rows } = await pgPool.query(`
+      UPDATE public.inscritos
+      SET status=$1, canceled_at=NULL, cancel_reason=NULL, updated_at=NOW()
+      WHERE id=$2
+      RETURNING id
+    `, [toStatus, id]);
+
+    if (!rows.length) return res.status(404).json({ ok:false, error:'not found' });
+
+    emitEvent('inscrito:update', { id, status: toStatus });
+    res.json({ ok:true, id });
+  } catch (e) {
+    console.error('[admin restore] err:', e?.message || e);
+    res.status(500).json({ ok:false, error:'restore failed' });
+  }
+});
+
+// Check-in toggle/forçado
+app.post('/api/admin/inscritos/:id/checkin', adminAuth, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const force = req.body?.value; // 0/1 opcional
+    const q = typeof force === 'number'
+      ? `UPDATE public.inscritos SET checkin=$2, updated_at=NOW() WHERE id=$1 RETURNING id, checkin`
+      : `UPDATE public.inscritos SET checkin=CASE WHEN checkin=1 THEN 0 ELSE 1 END, updated_at=NOW() WHERE id=$1 RETURNING id, checkin`;
+    const args = typeof force === 'number' ? [id, force] : [id];
+    const { rows } = await pgPool.query(q, args);
+    if (!rows.length) return res.status(404).json({ ok:false, error:'not found' });
+    emitEvent('inscrito:update', { id, checkin: rows[0].checkin });
+    res.json({ ok:true, id, checkin: rows[0].checkin });
+  } catch (e) {
+    console.error('[admin:checkin] err:', e?.message || e);
+    res.status(500).json({ ok:false, error:'checkin failed' });
+  }
 });
 
 /* ======================================================================
