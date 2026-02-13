@@ -1,457 +1,287 @@
-<!doctype html>
-<html lang="pt-BR">
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Admin • Retiro 2026</title>
+<script>
+  const API = location.origin; // mesmo host do backend/render
+  let ADMIN_TOKEN = localStorage.getItem('x-admin-token') || '';
 
-  <!-- ====== CSS embutido (identidade da landing) ====== -->
-  <style>
-    :root{
-      /* Ajuste aqui pra ficar com a identidade da landing */
-      --brand-bg: #0f1226;
-      --brand-primary: #8b5cf6; /* violeta */
-      --brand-primary-600:#7c3aed;
-      --brand-text: #f8fafc;
-      --muted: #a3a3a3;
-      --ok: #10b981;
-      --warn: #f59e0b;
-      --danger: #ef4444;
-      --panel: #151a3a;
-      --panel-2:#1b214a;
-      --line: #2a2f57;
-      --radius: 10px;
-      --font: system-ui, -apple-system, Segoe UI, Roboto, Arial;
-    }
+  const qs = sel => document.querySelector(sel);
+  const qsa = sel => Array.from(document.querySelectorAll(sel));
 
-    *{box-sizing:border-box}
-    html,body{margin:0;padding:0;background:var(--brand-bg);color:var(--brand-text);font:14px/1.4 var(--font)}
+  const els = {
+    kpis: {
+      total: qs('#kpiInscritos'),
+      quitados: qs('#kpiQuitados'),
+      pendentes: qs('#kpiPendentes'),
+      leads: qs('#kpiLeads'),
+      leadsHoje: qs('#kpiLeadsHoje')
+    },
+    exportIns: qs('#btnExportInscritos'),
+    exportLeads: qs('#btnExportLeads'),
+    inpQ: qs('#inpQ'),
+    selStatus: qs('#selStatus'),
+    btnFiltrar: qs('#btnFiltrar'),
+    inpToken: qs('#inpToken'),
+    btnSalvarToken: qs('#btnSalvarToken'),
+    tb: qs('#tbInscritos'),
+    prev: qs('#prevPage'),
+    next: qs('#nextPage'),
+    info: qs('#pageInfo'),
 
-    .app-header{display:flex;align-items:center;justify-content:space-between;padding:12px 20px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,0.02),transparent)}
-    .brand{display:flex;align-items:center;gap:10px;font-weight:700}
-    .brand img{height:28px}
-    .actions{display:flex;gap:8px}
+    drawer: qs('#drawer'),
+    btnCloseDrawer: qs('#btnCloseDrawer'),
+    dId: qs('#dId'),
+    dMeta: qs('#dMeta'),
+    frmEdit: qs('#frmEdit'),
+    btnCancelar: qs('#btnCancelar'),
+    btnRestaurar: qs('#btnRestaurar'),
 
-    .container{max-width:1100px;margin:24px auto;padding:0 16px}
+    modal: qs('#modal'),
+    txtReason: qs('#txtReason'),
+    btnConfirmCancel: qs('#btnConfirmCancel'),
+    btnCancelModal: qs('#btnCancelModal')
+  };
 
-    .kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:16px}
-    .kpi{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:12px}
-    .kpi-label{color:var(--muted);font-size:12px}
-    .kpi-value{font-size:22px;font-weight:700}
-    .kpi-value.ok{color:var(--ok)}
-    .kpi-value.warn{color:var(--warn)}
+  let state = { page:1, size:20, q:'', status:'', totalPages:1, currentDetail:null };
 
-    .toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:12px 0}
-    .filters{display:flex;gap:8px;flex-wrap:wrap}
-    .filters input, .filters select, .token input{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:var(--brand-text);outline:none}
-    .token{display:flex;gap:8px;align-items:center}
-
-    .btn{background:var(--brand-primary);border:1px solid var(--brand-primary-600);color:#fff;border-radius:8px;padding:8px 12px;cursor:pointer}
-    .btn.ghost{background:transparent;border-color:var(--line)}
-    .btn.danger{background:var(--danger);border-color:#b91c1c}
-    .btn:disabled{opacity:.6;cursor:not-allowed}
-
-    .grid{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
-    .grid th,.grid td{padding:10px;border-bottom:1px solid var(--line);text-align:left}
-    .grid thead{background:var(--panel-2)}
-    .grid tbody tr:hover{background:rgba(255,255,255,0.03)}
-
-    .pager{display:flex;gap:10px;align-items:center;justify-content:center;margin:12px 0;color:var(--muted)}
-
-    .drawer{position:fixed;top:0;right:0;width:380px;height:100vh;background:var(--panel-2);border-left:1px solid var(--line);transform:translateX(105%);transition:.2s ease;padding:16px}
-    .drawer.hidden{transform:translateX(105%)}
-    .drawer:not(.hidden){transform:translateX(0)}
-    .drawer-close{position:absolute;right:10px;top:8px;background:transparent;border:0;color:#fff;font-size:24px;cursor:pointer}
-    .form{display:grid;gap:10px;margin-top:30px}
-    .form label{display:grid;gap:6px;font-size:12px;color:var(--muted)}
-    .form input, .form textarea{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:#fff}
-    .form-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
-    .hint{margin-top:8px;color:var(--muted);font-size:12px}
-
-    .modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center}
-    .modal.hidden{display:none}
-    .modal-body{width:min(520px,90vw);background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px}
-  </style>
-</head>
-<body>
-  <!-- ====== HEADER ====== -->
-  <header class="app-header">
-    <div class="brand">
-      <!-- Se tiver logo, substitua pelo seu caminho -->
-      <!-- <img src="./logo.svg" alt="logo"/> -->
-      <span>Admin • Retiro 2026</span>
-    </div>
-    <div class="actions">
-      <button id="btnExportInscritos" class="btn ghost">Exportar Inscritos</button>
-      <button id="btnExportLeads" class="btn ghost">Exportar Leads</button>
-    </div>
-  </header>
-
-  <!-- ====== CONTEÚDO ====== -->
-  <main class="container">
-    <!-- KPIs -->
-    <section class="kpis" id="kpis">
-      <div class="kpi"><div class="kpi-label">Inscritos</div><div class="kpi-value" id="kpiInscritos">—</div></div>
-      <div class="kpi"><div class="kpi-label">Quitados</div><div class="kpi-value ok" id="kpiQuitados">—</div></div>
-      <div class="kpi"><div class="kpi-label">Pendentes</div><div class="kpi-value warn" id="kpiPendentes">—</div></div>
-      <div class="kpi"><div class="kpi-label">Leads</div><div class="kpi-value" id="kpiLeads">—</div></div>
-      <div class="kpi"><div class="kpi-label">Leads hoje</div><div class="kpi-value" id="kpiLeadsHoje">—</div></div>
-    </section>
-
-    <!-- Filtros / Token -->
-    <section class="toolbar">
-      <div class="filters">
-        <input id="inpQ" type="search" placeholder="Buscar por nome, e-mail ou CPF" />
-        <select id="selStatus">
-          <option value="">Todos os status</option>
-          <option value="pendente_pagamento">Pendente pagamento</option>
-          <option value="quitado">Quitado</option>
-          <option value="cancelado">Cancelado</option>
-        </select>
-        <button id="btnFiltrar" class="btn">Filtrar</button>
-      </div>
-      <div class="token">
-        <input id="inpToken" type="password" placeholder="x-admin-token" />
-        <button id="btnSalvarToken" class="btn ghost">Salvar token</button>
-      </div>
-    </section>
-
-    <!-- Tabela -->
-    <section>
-      <table class="grid">
-        <thead>
-          <tr>
-            <th>ID</th><th>Nome</th><th>E-mail</th><th>Telefone</th><th>Status</th><th>Forma</th><th>Criado</th><th>Ações</th>
-          </tr>
-        </thead>
-        <tbody id="tbInscritos"><tr><td colspan="8">Carregando…</td></tr></tbody>
-      </table>
-      <div class="pager">
-        <button id="prevPage" class="btn ghost">&laquo; Anterior</button>
-        <span id="pageInfo"></span>
-        <button id="nextPage" class="btn ghost">Próxima &raquo;</button>
-      </div>
-    </section>
-  </main>
-
-  <!-- Drawer Detalhes/Editar -->
-  <aside id="drawer" class="drawer hidden">
-    <div class="drawer-body">
-      <button class="drawer-close" id="btnCloseDrawer">×</button>
-      <h3>Inscrição <span id="dId">#</span></h3>
-      <form id="frmEdit" class="form">
-        <label>Nome <input name="nome"/></label>
-        <label>E-mail <input name="email" type="email"/></label>
-        <label>Telefone <input name="telefone"/></label>
-        <label>Frequenta PV <input name="frequentaPV"/></label>
-        <label>Campus <input name="campus"/></label>
-        <label>Forma de pagamento <input name="forma_pagamento"/></label>
-        <label>Nascimento <input name="nascimento" placeholder="AAAA-MM-DD"/></label>
-        <div class="form-row">
-          <button type="submit" class="btn">Salvar alterações</button>
-          <button type="button" class="btn ghost" id="btnCancelar">Cancelar inscrição</button>
-          <button type="button" class="btn ghost" id="btnRestaurar">Restaurar</button>
-        </div>
-        <div class="hint" id="dMeta"></div>
-      </form>
-    </div>
-  </aside>
-
-  <!-- Modal motivo cancelamento -->
-  <div id="modal" class="modal hidden">
-    <div class="modal-body">
-      <h4>Informar motivo do cancelamento</h4>
-      <textarea id="txtReason" rows="4" placeholder="Opcional"></textarea>
-      <div class="form-row">
-        <button id="btnConfirmCancel" class="btn danger">Confirmar cancelamento</button>
-        <button id="btnCancelModal" class="btn ghost">Fechar</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ====== JS embutido (o seu código, corrigido para template strings) ====== -->
-  <script>
-    const API = location.origin; // mesmo host do backend/render
-    let ADMIN_TOKEN = localStorage.getItem('x-admin-token') || '';
-
-    const qs = sel => document.querySelector(sel);
-    const qsa = sel => Array.from(document.querySelectorAll(sel));
-
-    const els = {
-      kpis: {
-        total: qs('#kpiInscritos'),
-        quitados: qs('#kpiQuitados'),
-        pendentes: qs('#kpiPendentes'),
-        leads: qs('#kpiLeads'),
-        leadsHoje: qs('#kpiLeadsHoje')
-      },
-      exportIns: qs('#btnExportInscritos'),
-      exportLeads: qs('#btnExportLeads'),
-      inpQ: qs('#inpQ'),
-      selStatus: qs('#selStatus'),
-      btnFiltrar: qs('#btnFiltrar'),
-      inpToken: qs('#inpToken'),
-      btnSalvarToken: qs('#btnSalvarToken'),
-      tb: qs('#tbInscritos'),
-      prev: qs('#prevPage'),
-      next: qs('#nextPage'),
-      info: qs('#pageInfo'),
-
-      drawer: qs('#drawer'),
-      btnCloseDrawer: qs('#btnCloseDrawer'),
-      dId: qs('#dId'),
-      dMeta: qs('#dMeta'),
-      frmEdit: qs('#frmEdit'),
-      btnCancelar: qs('#btnCancelar'),
-      btnRestaurar: qs('#btnRestaurar'),
-
-      modal: qs('#modal'),
-      txtReason: qs('#txtReason'),
-      btnConfirmCancel: qs('#btnConfirmCancel'),
-      btnCancelModal: qs('#btnCancelModal')
+  function authHeaders(extra={}) {
+    return {
+      'x-admin-token': ADMIN_TOKEN,
+      'Content-Type': 'application/json',
+      ...extra
     };
+  }
 
-    let state = { page:1, size:20, q:'', status:'', totalPages:1, currentDetail:null };
+  async function fetchJSON(url, opts={}) {
+    const r = await fetch(url, opts);
+    const t = await r.text();
+    let j; try { j = JSON.parse(t); } catch { j = { raw:t } }
+    if (!r.ok) throw Object.assign(new Error(j?.error || r.status), {status:r.status, body:j});
+    return j;
+  }
 
-    function authHeaders(extra={}) {
-      return {
-        'x-admin-token': ADMIN_TOKEN,
-        'Content-Type': 'application/json',
-        ...extra
-      };
-    }
+  async function loadOverview() {
+    const j = await fetchJSON(`${API}/api/admin/overview`, { headers:authHeaders() });
+    els.kpis.total.textContent = j.inscritos_total;
+    els.kpis.quitados.textContent = j.inscritos_quitados;
+    els.kpis.pendentes.textContent = j.inscritos_pendentes;
+    els.kpis.leads.textContent = j.leads_total;
+    els.kpis.leadsHoje.textContent = j.leads_hoje;
+  }
 
-    async function fetchJSON(url, opts={}) {
-      const r = await fetch(url, opts);
-      const t = await r.text();
-      let j; try { j = JSON.parse(t); } catch { j = { raw:t } }
-      if (!r.ok) throw Object.assign(new Error(j?.error || r.status), {status:r.status, body:j});
-      return j;
-    }
-
-    async function loadOverview() {
-      const j = await fetchJSON(\`\${API}/api/admin/overview\`, { headers:authHeaders() });
-      els.kpis.total.textContent = j.inscritos_total;
-      els.kpis.quitados.textContent = j.inscritos_quitados;
-      els.kpis.pendentes.textContent = j.inscritos_pendentes;
-      els.kpis.leads.textContent = j.leads_total;
-      els.kpis.leadsHoje.textContent = j.leads_hoje;
-    }
-
-    async function loadInscritos() {
-      const params = new URLSearchParams({
-        page: state.page, size: state.size,
-        ...(state.q ? {q: state.q} : {}),
-        ...(state.status ? {status: state.status} : {})
-      });
-      const j = await fetchJSON(\`\${API}/api/admin/inscritos/list?\`+params.toString(), { headers:authHeaders() });
-      renderTable(j.items || []);
-      els.info.textContent = \`Página \${j.page}\`;
-      state.totalPages = (j.items?.length === state.size) ? state.page+1 : state.page;
-    }
-
-    function renderTable(items) {
-      if (!items.length) { els.tb.innerHTML = '<tr><td colspan="8">Sem resultados</td></tr>'; return; }
-      els.tb.innerHTML = items.map(r => {
-        const created = r.criado_em ? new Date(r.criado_em).toLocaleString('pt-BR') : '';
-        const badge = statusBadge(r.status);
-        return `
-          <tr data-id="${r.id}">
-            <td>#${r.id}</td>
-            <td>${escapeHtml(r.nome || '')}</td>
-            <td>${escapeHtml(r.email || '')}</td>
-            <td>${escapeHtml(r.telefone || '')}</td>
-            <td>${badge}</td>
-            <td>${(r.forma_pagamento || '—').toUpperCase()}</td>
-            <td>${created}</td>
-            <td>
-              <button class="btn ghost" data-act="detalhe">Detalhes</button>
-            </td>
-          </tr>
-        `;
-      }).join('');
-    }
-
-    function statusBadge(s='') {
-      const sx = (s || '').toLowerCase();
-      let c = ''; if (sx==='quitado') c='ok'; else if (sx==='cancelado') c='danger'; else c='warn';
-      return `<span class="kpi-value ${c}" style="font-size:12px">${s || '—'}</span>`;
-    }
-
-    function escapeHtml(s) {
-      return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
-    }
-
-    // Drawer
-    async function openDetail(id) {
-      const j = await fetchJSON(\`\${API}/api/admin/inscritos/\${id}\`, { headers:authHeaders() });
-      state.currentDetail = j.item;
-      els.dId.textContent = \`#\${j.item.id}\`;
-      // Preenche form
-      const f = els.frmEdit;
-      f.nome.value = j.item.nome || '';
-      f.email.value = j.item.email || '';
-      f.telefone.value = j.item.telefone || '';
-      f.frequentaPV.value = j.item.frequentaPV || '';
-      f.campus.value = j.item.campus || '';
-      f.forma_pagamento.value = j.item.forma_pagamento || '';
-      f.nascimento.value = j.item.nascimento || '';
-
-      const meta = [];
-      if (j.item.status) meta.push(\`Status: \${j.item.status}\`);
-      if (j.item.criado_em) meta.push(\`Criado: \${new Date(j.item.criado_em).toLocaleString('pt-BR')}\`);
-      if (j.item.updated_at) meta.push(\`Atualizado: \${new Date(j.item.updated_at).toLocaleString('pt-BR')}\`);
-      if (j.item.canceled_at) meta.push(\`Cancelado: \${new Date(j.item.canceled_at).toLocaleString('pt-BR')}\`);
-      if (j.item.cancel_reason) meta.push(\`Motivo: \${escapeHtml(j.item.cancel_reason)}\`);
-      els.dMeta.innerHTML = meta.join('<br/>');
-
-      const isCanceled = (j.item.status || '').toLowerCase() === 'cancelado';
-      els.btnCancelar.disabled = isCanceled;
-      els.btnRestaurar.disabled = !isCanceled;
-
-      els.drawer.classList.remove('hidden');
-    }
-    function closeDetail() {
-      els.drawer.classList.add('hidden');
-      state.currentDetail = null;
-    }
-
-    // UI Events
-    els.btnSalvarToken.addEventListener('click', () => {
-      const v = els.inpToken.value.trim();
-      if (!v) return alert('Informe o x-admin-token');
-      ADMIN_TOKEN = v;
-      localStorage.setItem('x-admin-token', v);
-      bootstrap();
+  async function loadInscritos() {
+    const params = new URLSearchParams({
+      page: state.page, size: state.size,
+      ...(state.q ? {q: state.q} : {}),
+      ...(state.status ? {status: state.status} : {})
     });
-    els.btnFiltrar.addEventListener('click', () => {
-      state.q = els.inpQ.value.trim();
-      state.status = els.selStatus.value.trim();
-      state.page = 1;
-      loadInscritos().catch(handleAuthError);
-    });
-    els.prev.addEventListener('click', () => { if (state.page>1) { state.page--; loadInscritos().catch(handleAuthError); }});
-    els.next.addEventListener('click', () => { state.page++; loadInscritos().catch(handleAuthError); });
+    const j = await fetchJSON(`${API}/api/admin/inscritos/list?`+params.toString(), { headers:authHeaders() });
+    renderTable(j.items || []);
+    els.info.textContent = `Página ${j.page}`;
+    state.totalPages = (j.items?.length === state.size) ? state.page+1 : state.page;
+  }
 
-    els.exportIns.addEventListener('click', () => window.open(`${API}/api/admin/export/inscritos.csv?token=${encodeURIComponent(ADMIN_TOKEN)}`,'_blank'));
-    els.exportLeads.addEventListener('click', () => window.open(`${API}/api/admin/export/leads.csv?token=${encodeURIComponent(ADMIN_TOKEN)}`,'_blank'));
+  function renderTable(items) {
+    if (!items.length) { els.tb.innerHTML = '<tr><td colspan="8">Sem resultados</td></tr>'; return; }
+    els.tb.innerHTML = items.map(r => {
+      const created = r.criado_em ? new Date(r.criado_em).toLocaleString('pt-BR') : '';
+      const badge = statusBadge(r.status);
+      return `
+        <tr data-id="${r.id}">
+          <td>#${r.id}</td>
+          <td>${escapeHtml(r.nome || '')}</td>
+          <td>${escapeHtml(r.email || '')}</td>
+          <td>${escapeHtml(r.telefone || '')}</td>
+          <td>${badge}</td>
+          <td>${(r.forma_pagamento || '—').toUpperCase()}</td>
+          <td>${created}</td>
+          <td>
+            <button class="btn ghost" data-act="detalhe">Detalhes</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
 
-    els.tb.addEventListener('click', (ev) => {
-      const btn = ev.target.closest('button[data-act]');
-      if (!btn) return;
-      const tr = ev.target.closest('tr'); const id = tr?.dataset?.id;
-      if (!id) return;
-      if (btn.dataset.act === 'detalhe') openDetail(id).catch(handleAuthError);
-    });
+  function statusBadge(s='') {
+    const sx = (s || '').toLowerCase();
+    let c = ''; if (sx==='quitado') c='ok'; else if (sx==='cancelado') c='danger'; else c='warn';
+    return `<span class="kpi-value ${c}" style="font-size:12px">${escapeHtml(s || '—')}</span>`;
+  }
 
-    // Drawer ações
-    els.btnCloseDrawer.addEventListener('click', closeDetail);
+  // Corrigido: escapar adequadamente &, <, >
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;');
+  }
 
-    els.frmEdit.addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      if (!state.currentDetail) return;
-      const fd = new FormData(els.frmEdit);
-      const payload = Object.fromEntries(fd.entries());
-      try {
-        await fetchJSON(\`\${API}/api/admin/inscritos/\${state.currentDetail.id}\`, {
-          method:'PUT',
-          headers:authHeaders(),
-          body: JSON.stringify(payload)
-        });
-        toast('Alterações salvas');
-        loadInscritos().catch(()=>{});
-      } catch(e){ handleAuthError(e); }
-    });
+  // Drawer
+  async function openDetail(id) {
+    const j = await fetchJSON(`${API}/api/admin/inscritos/${id}`, { headers:authHeaders() });
+    state.currentDetail = j.item;
+    els.dId.textContent = `#${j.item.id}`;
+    // Preenche form
+    const f = els.frmEdit;
+    f.nome.value = j.item.nome || '';
+    f.email.value = j.item.email || '';
+    f.telefone.value = j.item.telefone || '';
+    f.frequentaPV.value = j.item.frequentaPV || '';
+    f.campus.value = j.item.campus || '';
+    f.forma_pagamento.value = j.item.forma_pagamento || '';
+    f.nascimento.value = j.item.nascimento || '';
 
-    let cancelPending = null;
-    els.btnCancelar.addEventListener('click', () => {
-      els.modal.classList.remove('hidden');
-      cancelPending = true;
-    });
-    els.btnCancelModal.addEventListener('click', () => {
-      els.modal.classList.add('hidden');
-      cancelPending = null;
-    });
-    els.btnConfirmCancel.addEventListener('click', async () => {
-      if (!state.currentDetail) return;
-      const reason = els.txtReason.value.trim();
-      try {
-        await fetchJSON(\`\${API}/api/admin/inscritos/\${state.currentDetail.id}/cancel\`, {
-          method:'POST',
-          headers:authHeaders(),
-          body: JSON.stringify({ reason })
-        });
-        toast('Inscrição cancelada');
-        els.modal.classList.add('hidden');
-        closeDetail();
-        loadInscritos().catch(()=>{});
-      } catch(e){ handleAuthError(e); }
-    });
+    const meta = [];
+    if (j.item.status) meta.push(`Status: ${escapeHtml(j.item.status)}`);
+    if (j.item.criado_em) meta.push(`Criado: ${new Date(j.item.criado_em).toLocaleString('pt-BR')}`);
+    if (j.item.updated_at) meta.push(`Atualizado: ${new Date(j.item.updated_at).toLocaleString('pt-BR')}`);
+    if (j.item.canceled_at) meta.push(`Cancelado: ${new Date(j.item.canceled_at).toLocaleString('pt-BR')}`);
+    if (j.item.cancel_reason) meta.push(`Motivo: ${escapeHtml(j.item.cancel_reason)}`);
+    els.dMeta.innerHTML = meta.join('<br/>');
 
-    els.btnRestaurar.addEventListener('click', async () => {
-      if (!state.currentDetail) return;
-      try {
-        await fetchJSON(\`\${API}/api/admin/inscritos/\${state.currentDetail.id}/restore\`, {
-          method:'POST',
-          headers:authHeaders(),
-          body: JSON.stringify({ status: 'pendente_pagamento' })
-        });
-        toast('Inscrição restaurada');
-        closeDetail();
-        loadInscritos().catch(()=>{});
-      } catch(e){ handleAuthError(e); }
-    });
+    const isCanceled = (j.item.status || '').toLowerCase() === 'cancelado';
+    els.btnCancelar.disabled = isCanceled;
+    els.btnRestaurar.disabled = !isCanceled;
 
-    // SSE tempo real
-    function startSSE() {
-      if (!ADMIN_TOKEN) return;
-      const url = \`\${API}/api/admin/events?token=\${encodeURIComponent(ADMIN_TOKEN)}\`;
-      const ev = new EventSource(url);
-      ev.addEventListener('message', (m) => {
-        try {
-          const data = JSON.parse(m.data);
-          if (data?.type === 'inscrito:new') {
-            loadOverview().catch(()=>{});
-            loadInscritos().catch(()=>{});
-            toast(\`Novo inscrito: \${data?.payload?.nome || '#'+data?.payload?.id}\`);
-          } else if (data?.type === 'inscrito:update') {
-            loadOverview().catch(()=>{});
-            loadInscritos().catch(()=>{});
-          } else if (data?.type === 'lead:new') {
-            loadOverview().catch(()=>{});
-          }
-        } catch {}
-      });
-    }
+    els.drawer.classList.remove('hidden');
+  }
+  function closeDetail() {
+    els.drawer.classList.add('hidden');
+    state.currentDetail = null;
+  }
 
-    function handleAuthError(e) {
-      if (e?.status === 401 || e?.status === 503) {
-        alert('Token inválido ou não configurado. Informe o x-admin-token.');
-      } else {
-        console.error(e);
-        alert('Falha na operação.');
-      }
-    }
-
-    // toasts simples
-    function toast(msg) {
-      const d = document.createElement('div');
-      d.textContent = msg;
-      d.style.position='fixed'; d.style.right='12px'; d.style.bottom='12px';
-      d.style.background='rgba(0,0,0,.7)'; d.style.padding='8px 10px';
-      d.style.borderRadius='8px'; d.style.fontSize='13px'; d.style.zIndex='9999';
-      document.body.appendChild(d);
-      setTimeout(()=>d.remove(), 2000);
-    }
-
-    async function bootstrap() {
-      if (ADMIN_TOKEN) els.inpToken.value = ADMIN_TOKEN;
-      await loadOverview().catch(handleAuthError);
-      await loadInscritos().catch(handleAuthError);
-      startSSE();
-    }
-
+  // UI Events
+  els.btnSalvarToken.addEventListener('click', () => {
+    const v = els.inpToken.value.trim();
+    if (!v) return alert('Informe o x-admin-token');
+    ADMIN_TOKEN = v;
+    localStorage.setItem('x-admin-token', v);
     bootstrap();
-  </script>
-</body>
-</html>
+  });
+  els.btnFiltrar.addEventListener('click', () => {
+    state.q = els.inpQ.value.trim();
+    state.status = els.selStatus.value.trim();
+    state.page = 1;
+    loadInscritos().catch(handleAuthError);
+  });
+  els.prev.addEventListener('click', () => { if (state.page>1) { state.page--; loadInscritos().catch(handleAuthError); }});
+  els.next.addEventListener('click', () => { state.page++; loadInscritos().catch(handleAuthError); });
+
+  els.exportIns.addEventListener('click', () => window.open(`${API}/api/admin/export/inscritos.csv?token=${encodeURIComponent(ADMIN_TOKEN)}`,'_blank'));
+  els.exportLeads.addEventListener('click', () => window.open(`${API}/api/admin/export/leads.csv?token=${encodeURIComponent(ADMIN_TOKEN)}`,'_blank'));
+
+  els.tb.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('button[data-act]');
+    if (!btn) return;
+    const tr = ev.target.closest('tr'); const id = tr?.dataset?.id;
+    if (!id) return;
+    if (btn.dataset.act === 'detalhe') openDetail(id).catch(handleAuthError);
+  });
+
+  // Drawer ações
+  els.btnCloseDrawer.addEventListener('click', closeDetail);
+
+  els.frmEdit.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    if (!state.currentDetail) return;
+    const fd = new FormData(els.frmEdit);
+    const payload = Object.fromEntries(fd.entries());
+    try {
+      await fetchJSON(`${API}/api/admin/inscritos/${state.currentDetail.id}`, {
+        method:'PUT',
+        headers:authHeaders(),
+        body: JSON.stringify(payload)
+      });
+      toast('Alterações salvas');
+      loadInscritos().catch(()=>{});
+    } catch(e){ handleAuthError(e); }
+  });
+
+  let cancelPending = null;
+  els.btnCancelar.addEventListener('click', () => {
+    els.modal.classList.remove('hidden');
+    cancelPending = true;
+  });
+  els.btnCancelModal.addEventListener('click', () => {
+    els.modal.classList.add('hidden');
+    cancelPending = null;
+  });
+  els.btnConfirmCancel.addEventListener('click', async () => {
+    if (!state.currentDetail) return;
+    const reason = els.txtReason.value.trim();
+    try {
+      await fetchJSON(`${API}/api/admin/inscritos/${state.currentDetail.id}/cancel`, {
+        method:'POST',
+        headers:authHeaders(),
+        body: JSON.stringify({ reason })
+      });
+      toast('Inscrição cancelada');
+      els.modal.classList.add('hidden');
+      closeDetail();
+      loadInscritos().catch(()=>{});
+    } catch(e){ handleAuthError(e); }
+  });
+
+  els.btnRestaurar.addEventListener('click', async () => {
+    if (!state.currentDetail) return;
+    try {
+      await fetchJSON(`${API}/api/admin/inscritos/${state.currentDetail.id}/restore`, {
+        method:'POST',
+        headers:authHeaders(),
+        body: JSON.stringify({ status: 'pendente_pagamento' })
+      });
+      toast('Inscrição restaurada');
+      closeDetail();
+      loadInscritos().catch(()=>{});
+    } catch(e){ handleAuthError(e); }
+  });
+
+  // SSE tempo real
+  function startSSE() {
+    if (!ADMIN_TOKEN) return;
+    const url = `${API}/api/admin/events?token=${encodeURIComponent(ADMIN_TOKEN)}`;
+    const ev = new EventSource(url);
+    ev.addEventListener('message', (m) => {
+      try {
+        const data = JSON.parse(m.data);
+        if (data?.type === 'inscrito:new') {
+          loadOverview().catch(()=>{});
+          loadInscritos().catch(()=>{});
+          toast(`Novo inscrito: ${data?.payload?.nome || '#'+data?.payload?.id}`);
+        } else if (data?.type === 'inscrito:update') {
+          loadOverview().catch(()=>{});
+          loadInscritos().catch(()=>{});
+        } else if (data?.type === 'lead:new') {
+          loadOverview().catch(()=>{});
+        }
+      } catch {}
+    });
+  }
+
+  function handleAuthError(e) {
+    if (e?.status === 401 || e?.status === 503) {
+      alert('Token inválido ou não configurado. Informe o x-admin-token.');
+    } else {
+      console.error(e);
+      alert('Falha na operação.');
+    }
+  }
+
+  // toasts simples
+  function toast(msg) {
+    const d = document.createElement('div');
+    d.textContent = msg;
+    d.style.position='fixed'; d.style.right='12px'; d.style.bottom='12px';
+    d.style.background='rgba(0,0,0,.7)'; d.style.padding='8px 10px';
+    d.style.borderRadius='8px'; d.style.fontSize='13px'; d.style.zIndex='9999';
+    document.body.appendChild(d);
+    setTimeout(()=>d.remove(), 2000);
+  }
+
+  async function bootstrap() {
+    if (ADMIN_TOKEN) els.inpToken.value = ADMIN_TOKEN;
+    await loadOverview().catch(handleAuthError);
+    await loadInscritos().catch(handleAuthError);
+    startSSE();
+  }
+
+  bootstrap();
+</script>
